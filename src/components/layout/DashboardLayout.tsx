@@ -58,6 +58,7 @@ export function DashboardLayout() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Mobile Header */}
       <header className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-white border-b px-4 py-3">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold">LMS Academy</h1>
@@ -71,6 +72,7 @@ export function DashboardLayout() {
         </div>
       </header>
 
+      {/* Sidebar */}
       <aside className={cn(
         "fixed top-0 left-0 z-40 h-full w-64 bg-white border-r transition-transform duration-300 ease-in-out lg:translate-x-0",
         sidebarOpen ? "translate-x-0" : "-translate-x-full"
@@ -119,6 +121,7 @@ export function DashboardLayout() {
         </div>
       </aside>
 
+      {/* Main Content */}
       <main className="lg:ml-64 pt-16 lg:pt-0 min-h-screen">
         <div className="p-4 lg:p-8">
           <Outlet />

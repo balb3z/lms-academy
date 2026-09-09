@@ -12,17 +12,32 @@ export function useAuth() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    console.log('🔐 useAuth: Setting up auth listener...');
+    
     const { data: subscription } = auth.onAuthStateChange(async (event, session) => {
+      console.log('🔐 Auth state changed:', event);
+      
       if (session?.user) {
-        const { data: userData } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
+        console.log('🔐 User authenticated:', session.user.email);
+        try {
+          const { data: userData, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
           
-        setUser(userData);
-        setRole(userData?.role);
+          if (error) {
+            console.error('❌ Error fetching user data:', error);
+          } else {
+            console.log('✅ User data loaded:', userData);
+            setUser(userData);
+            setRole(userData?.role);
+          }
+        } catch (error) {
+          console.error('❌ Error in auth state change:', error);
+        }
       } else {
+        console.log('🔐 User logged out');
         setUser(null);
         setRole(null);
       }
@@ -36,7 +51,9 @@ export function useAuth() {
 
   const signIn = async (email: string, password: string) => {
     try {
+      console.log('🔐 Signing in:', email);
       const { user, role } = await auth.signIn(email, password);
+      console.log('✅ Sign in successful:', email, 'Role:', role);
       setUser(user);
       setRole(role);
       
@@ -50,21 +67,31 @@ export function useAuth() {
         case 'student':
           navigate('/student');
           break;
+        default:
+          navigate('/');
       }
       toast.success('Welcome back!');
     } catch (error: any) {
+      console.error('❌ Sign in error:', error);
       toast.error(error.message || 'Login failed');
       throw error;
     }
   };
 
   const signOut = async () => {
-    await auth.signOut();
-    setUser(null);
-    setRole(null);
-    navigate('/auth/login');
-    toast.info('Logged out successfully');
+    try {
+      await auth.signOut();
+      setUser(null);
+      setRole(null);
+      navigate('/auth/login');
+      toast.info('Logged out successfully');
+    } catch (error: any) {
+      console.error('❌ Sign out error:', error);
+      toast.error(error.message || 'Logout failed');
+    }
   };
+
+  console.log('🔐 useAuth state:', { user: user?.email, role, loading });
 
   return { user, role, loading, signIn, signOut };
 }
