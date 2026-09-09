@@ -1,6 +1,5 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -13,6 +12,8 @@ import { Students } from '@/pages/management/Students';
 import { StudentProfile } from '@/pages/management/StudentProfile';
 import { Teachers } from '@/pages/management/Teachers';
 import { TeacherProfile } from '@/pages/management/TeacherProfile';
+import { Courses } from '@/pages/management/Courses';
+import { CourseDetails } from '@/pages/management/CourseDetails';
 import { Lessons } from '@/pages/management/Lessons';
 import { LessonDetails } from '@/pages/management/LessonDetails';
 import { Reports } from '@/pages/management/Reports';
@@ -95,6 +96,8 @@ function App() {
               <Route path="students/:id" element={<StudentProfile />} />
               <Route path="teachers" element={<Teachers />} />
               <Route path="teachers/:id" element={<TeacherProfile />} />
+              <Route path="courses" element={<Courses />} />
+              <Route path="courses/:id" element={<CourseDetails />} />
               <Route path="lessons" element={<Lessons />} />
               <Route path="lessons/:id" element={<LessonDetails />} />
               <Route path="reports" element={<Reports />} />
@@ -127,7 +130,7 @@ function App() {
           <Route path="/" element={<Navigate to="/auth/login" />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
-        <ToastContainer 
+        <ToastContainer
           position="bottom-right"
           autoClose={3000}
           hideProgressBar={false}

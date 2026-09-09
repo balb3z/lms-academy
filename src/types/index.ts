@@ -1,4 +1,7 @@
 export type UserRole = 'management' | 'teacher' | 'student';
+export type CourseStatus = 'active' | 'completed' | 'paused' | 'cancelled';
+export type PaymentStatus = 'paid' | 'unpaid' | 'partial' | 'overdue';
+export type PaymentType = 'per_hour' | 'monthly' | 'per_lesson';
 
 export interface User {
   id: string;
@@ -50,11 +53,41 @@ export interface Subject {
   color: string;
 }
 
+export interface Course {
+  id: string;
+  name: string;
+  student_id: string;
+  teacher_id: string;
+  total_lessons: number;
+  lessons_per_week: number;
+  lesson_duration_minutes: number;
+  preferred_days: string[];
+  preferred_time: string;
+  start_date: string;
+  price_per_hour?: number;
+  monthly_price?: number;
+  currency: string;
+  payment_type: PaymentType;
+  status: CourseStatus;
+  payment_status: PaymentStatus;
+  notes?: string;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+  // Joined / computed fields
+  student?: Student;
+  teacher?: Teacher;
+  lessons?: Lesson[];
+  payments?: Payment[];
+}
+
 export interface Lesson {
   id: string;
   student_id: string;
   teacher_id: string;
-  subject_id: string;
+  subject_id?: string;
+  course_id?: string;
+  lesson_number?: number;
   title: string;
   description?: string;
   scheduled_date: string;
@@ -78,6 +111,25 @@ export interface Lesson {
   student?: Student;
   teacher?: Teacher;
   subject?: Subject;
+  course?: Course;
+}
+
+export interface Payment {
+  id: string;
+  course_id: string;
+  student_id: string;
+  amount: number;
+  currency: string;
+  payment_date: string;
+  payment_method?: string;
+  period_start?: string;
+  period_end?: string;
+  status: 'pending' | 'completed' | 'failed' | 'refunded';
+  notes?: string;
+  recorded_by?: string;
+  created_at: string;
+  updated_at: string;
+  course?: Course;
 }
 
 export interface LessonReport {
