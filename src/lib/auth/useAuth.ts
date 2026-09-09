@@ -14,38 +14,69 @@ export function useAuth() {
   useEffect(() => {
     console.log('🔐 useAuth: Setting up auth listener...');
     
-    const { data: subscription } = auth.onAuthStateChange(async (event, session) => {
-      console.log('🔐 Auth state changed:', event);
-      
-      if (session?.user) {
-        console.log('🔐 User authenticated:', session.user.email);
-        try {
-          const { data: userData, error } = await supabase
+    let subscription: any = null;
+
+    const setupAuthListener = async () => {
+      try {
+        // Get current session first
+        const { data: sessionData } = await auth.getCurrentSession();
+        if (sessionData?.session?.user) {
+          const { data: userData } = await supabase
             .from('users')
             .select('*')
-            .eq('id', session.user.id)
+            .eq('id', sessionData.session.user.id)
             .single();
-          
-          if (error) {
-            console.error('❌ Error fetching user data:', error);
-          } else {
-            console.log('✅ User data loaded:', userData);
+          if (userData) {
             setUser(userData);
-            setRole(userData?.role);
+            setRole(userData.role);
           }
-        } catch (error) {
-          console.error('❌ Error in auth state change:', error);
         }
-      } else {
-        console.log('🔐 User logged out');
-        setUser(null);
-        setRole(null);
+        setLoading(false);
+
+        // Set up auth listener
+        const { data: authData } = supabase.auth.onAuthStateChange(async (event, session) => {
+          console.log('🔐 Auth event:', event);
+          
+          if (session?.user) {
+            console.log('🔐 User authenticated:', session.user.email);
+            try {
+              const { data: userData, error } = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', session.user.id)
+                .single();
+              
+              if (error) {
+                console.error('❌ Error fetching user data:', error);
+              } else {
+                console.log('✅ User data loaded:', userData);
+                setUser(userData);
+                setRole(userData?.role);
+              }
+            } catch (error) {
+              console.error('❌ Error in auth state change:', error);
+            }
+          } else {
+            console.log('🔐 User logged out');
+            setUser(null);
+            setRole(null);
+          }
+          setLoading(false);
+        });
+
+        subscription = authData;
+      } catch (error) {
+        console.error('❌ Error setting up auth:', error);
+        setLoading(false);
       }
-      setLoading(false);
-    });
+    };
+
+    setupAuthListener();
 
     return () => {
-      subscription?.unsubscribe();
+      if (subscription && typeof subscription.unsubscribe === 'function') {
+        subscription.unsubscribe();
+      }
     };
   }, []);
 
