@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
@@ -26,23 +26,55 @@ export function StudentLessons() {
 
   const fetchLessons = async () => {
     const studentId = user?.id;
+    setLoading(true);
 
-    const { data } = await supabase
-      .from('lessons')
-      .select(`
-        *,
-        teacher:teacher_id (
-          id,
-          profile:user_id (full_name)
-        ),
-        subject:subject_id (*)
-      `)
-      .eq('student_id', studentId)
-      .order('scheduled_date', { ascending: false })
-      .order('start_time');
+    try {
+      // Fetch the student's lessons, then resolve teacher names + subjects via
+      // separate round-trips. (Previously the broken profile:user_id embed made
+      // the whole query fail, so no lessons were listed.)
+      const { data: rows, error } = await supabase
+        .from('lessons')
+        .select('*')
+        .eq('student_id', studentId)
+        .order('scheduled_date', { ascending: false })
+        .order('start_time');
 
-    setLessons(data || []);
-    setLoading(false);
+      if (error) {
+        console.error('Error fetching student lessons:', error);
+        setLessons([]);
+        setLoading(false);
+        return;
+      }
+
+      const lessonRows = rows || [];
+      const teacherIds = [...new Set(lessonRows.map((l: any) => l.teacher_id).filter(Boolean))];
+      const subjectIds = [...new Set(lessonRows.map((l: any) => l.subject_id).filter(Boolean))];
+
+      const [profilesRes, subjectsRes] = await Promise.all([
+        teacherIds.length > 0
+          ? supabase.from('profiles').select('id, full_name').in('id', teacherIds)
+          : Promise.resolve({ data: [] as any[] }),
+        subjectIds.length > 0
+          ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
+
+      const enriched: Lesson[] = lessonRows.map((l: any) => {
+        const tp = (profilesRes.data || []).find((p: any) => p.id === l.teacher_id);
+        const subj = (subjectsRes.data || []).find((s: any) => s.id === l.subject_id);
+        return {
+          ...l,
+          teacher: { id: l.teacher_id, profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined },
+          subject: subj || undefined,
+        };
+      });
+
+      setLessons(enriched);
+    } catch (err) {
+      console.error('Unexpected error loading student lessons:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getStatusVariant = (status: string) => {
@@ -113,8 +145,8 @@ export function StudentLessons() {
                     <TableCell>{formatDate(lesson.scheduled_date)}</TableCell>
                     <TableCell>{formatTime(lesson.start_time)} - {formatTime(lesson.end_time)}</TableCell>
                     <TableCell className="font-medium">{lesson.title}</TableCell>
-                    <TableCell>{lesson.teacher?.profile?.full_name}</TableCell>
-                    <TableCell>{lesson.subject?.name}</TableCell>
+                    <TableCell>{lesson.teacher?.profile?.full_name || '-'}</TableCell>
+                    <TableCell>{lesson.subject?.name || '-'}</TableCell>
                     <TableCell>
                       <Badge variant={getStatusVariant(lesson.status)}>
                         {lesson.status}
@@ -125,6 +157,7 @@ export function StudentLessons() {
                         variant="ghost"
                         size="icon"
                         onClick={() => navigate(`/student/lessons/${lesson.id}`)}
+                        aria-label="View lesson"
                       >
                         <Eye className="h-4 w-4" />
                       </Button>
