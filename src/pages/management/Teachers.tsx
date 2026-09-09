@@ -10,8 +10,13 @@ import { Teacher } from '@/types';
 import { Search, Plus, Eye, Edit, Trash2, UserCog } from 'lucide-react';
 import { AddTeacherModal } from '@/components/management/AddTeacherModal';
 
+// Augmented type that includes email merged from the users table
+interface TeacherRow extends Teacher {
+  email?: string;
+}
+
 export function Teachers() {
-  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [teachers, setTeachers] = useState<TeacherRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -23,41 +28,59 @@ export function Teachers() {
 
   const fetchTeachers = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('teachers')
-      .select(`
-        *,
-        profile:id (
-          full_name,
-          phone,
-          avatar_url
-        ),
-        user:id (
-          email
-        )
-      `)
-      .order('created_at', { ascending: false });
+    try {
+      // Fetch teacher rows
+      const { data: teacherRows, error: teachersError } = await supabase
+        .from('teachers')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching teachers:', error);
+      if (teachersError) {
+        console.error('Error fetching teachers:', teachersError);
+        setLoading(false);
+        return;
+      }
+
+      if (!teacherRows || teacherRows.length === 0) {
+        setTeachers([]);
+        setLoading(false);
+        return;
+      }
+
+      const ids = teacherRows.map((t) => t.id);
+
+      // Fetch profiles and users in parallel
+      const [{ data: profiles }, { data: users }] = await Promise.all([
+        supabase.from('profiles').select('id, full_name, phone, avatar_url').in('id', ids),
+        supabase.from('users').select('id, email').in('id', ids),
+      ]);
+
+      // Merge everything into one object per teacher
+      const enriched: TeacherRow[] = teacherRows.map((t) => {
+        const profile = profiles?.find((p) => p.id === t.id);
+        const user = users?.find((u) => u.id === t.id);
+        return {
+          ...t,
+          email: user?.email,
+          profile: profile
+            ? { id: profile.id, full_name: profile.full_name, phone: profile.phone, avatar_url: profile.avatar_url }
+            : undefined,
+        };
+      });
+
+      setTeachers(enriched);
+    } catch (err) {
+      console.error('Unexpected error loading teachers:', err);
+    } finally {
+      setLoading(false);
     }
-
-    // Merge email into profile for consistent access pattern used by the table
-    const enriched = (data || []).map((t: any) => ({
-      ...t,
-      profile: t.profile
-        ? { ...t.profile, email: t.user?.email }
-        : undefined,
-    }));
-
-    setTeachers(enriched);
-    setLoading(false);
   };
 
-  const filteredTeachers = teachers.filter(teacher =>
-    teacher.profile?.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-    (teacher.profile as any)?.email?.toLowerCase().includes(search.toLowerCase()) ||
-    teacher.teacher_id?.toLowerCase().includes(search.toLowerCase())
+  const filteredTeachers = teachers.filter(
+    (t) =>
+      t.profile?.full_name?.toLowerCase().includes(search.toLowerCase()) ||
+      t.email?.toLowerCase().includes(search.toLowerCase()) ||
+      t.teacher_id?.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -115,8 +138,8 @@ export function Teachers() {
                 filteredTeachers.map((teacher) => (
                   <TableRow key={teacher.id}>
                     <TableCell className="font-mono text-sm">{teacher.teacher_id}</TableCell>
-                    <TableCell className="font-medium">{teacher.profile?.full_name}</TableCell>
-                    <TableCell>{(teacher.profile as any)?.email || '-'}</TableCell>
+                    <TableCell className="font-medium">{teacher.profile?.full_name || '-'}</TableCell>
+                    <TableCell>{teacher.email || '-'}</TableCell>
                     <TableCell>{teacher.specialization || '-'}</TableCell>
                     <TableCell>
                       <Badge variant={teacher.is_active ? 'success' : 'secondary'}>

@@ -8,18 +8,14 @@ import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'react-toastify';
 
-interface Student {
+interface StudentOption {
   id: string;
-  profile?: {
-    full_name: string;
-  };
+  full_name: string;
 }
 
-interface Teacher {
+interface TeacherOption {
   id: string;
-  profile?: {
-    full_name: string;
-  };
+  full_name: string;
 }
 
 interface Subject {
@@ -35,10 +31,11 @@ interface AddLessonModalProps {
 
 export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps) {
   const { user } = useAuth();
-  const [students, setStudents] = useState<Student[]>([]);
-  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [students, setStudents] = useState<StudentOption[]>([]);
+  const [teachers, setTeachers] = useState<TeacherOption[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetchingData, setFetchingData] = useState(false);
   const [formData, setFormData] = useState({
     student_id: '',
     teacher_id: '',
@@ -60,24 +57,61 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
   }, [open]);
 
   const fetchData = async () => {
+    setFetchingData(true);
     try {
+      // Fetch students, teachers (base rows) and subjects in parallel
       const [studentsRes, teachersRes, subjectsRes] = await Promise.all([
-        supabase.from('students').select('*, profile:user_id(*)').eq('is_active', true),
-        supabase.from('teachers').select('*, profile:user_id(*)').eq('is_active', true),
-        supabase.from('subjects').select('*')
+        supabase.from('students').select('id').eq('is_active', true),
+        supabase.from('teachers').select('id').eq('is_active', true),
+        supabase.from('subjects').select('*').order('name'),
       ]);
 
-      setStudents((studentsRes.data as Student[]) || []);
-      setTeachers((teachersRes.data as Teacher[]) || []);
+      // Collect IDs so we can fetch profiles in a single round-trip each
+      const studentIds = (studentsRes.data || []).map((s: { id: string }) => s.id);
+      const teacherIds = (teachersRes.data || []).map((t: { id: string }) => t.id);
+
+      const [studentProfilesRes, teacherProfilesRes] = await Promise.all([
+        studentIds.length > 0
+          ? supabase.from('profiles').select('id, full_name').in('id', studentIds)
+          : Promise.resolve({ data: [] }),
+        teacherIds.length > 0
+          ? supabase.from('profiles').select('id, full_name').in('id', teacherIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      // Build display-friendly option lists
+      const studentOptions: StudentOption[] = studentIds.map((id) => {
+        const profile = (studentProfilesRes.data || []).find((p: { id: string; full_name: string }) => p.id === id);
+        return { id, full_name: profile?.full_name || `Student (${id.slice(0, 8)})` };
+      });
+
+      const teacherOptions: TeacherOption[] = teacherIds.map((id) => {
+        const profile = (teacherProfilesRes.data || []).find((p: { id: string; full_name: string }) => p.id === id);
+        return { id, full_name: profile?.full_name || `Teacher (${id.slice(0, 8)})` };
+      });
+
+      setStudents(studentOptions);
+      setTeachers(teacherOptions);
       setSubjects((subjectsRes.data as Subject[]) || []);
     } catch (error) {
-      console.error('Error fetching data:', error);
-      toast.error('Failed to load data');
+      console.error('Error fetching lesson form data:', error);
+      toast.error('Failed to load students and teachers. Please try again.');
+    } finally {
+      setFetchingData(false);
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!formData.student_id) { toast.error('Please select a student.'); return; }
+    if (!formData.teacher_id) { toast.error('Please select a teacher.'); return; }
+    if (!formData.subject_id) { toast.error('Please select a subject.'); return; }
+    if (!formData.title.trim()) { toast.error('Please enter a lesson title.'); return; }
+    if (!formData.scheduled_date) { toast.error('Please select a date.'); return; }
+    if (!formData.start_time || !formData.end_time) { toast.error('Please set start and end times.'); return; }
+    if (!formData.meeting_url.trim()) { toast.error('Please enter a meeting URL.'); return; }
+
     setLoading(true);
 
     try {
@@ -85,49 +119,68 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
       const end = new Date(`1970-01-01T${formData.end_time}`);
       const duration = (end.getTime() - start.getTime()) / (1000 * 60);
 
-      const { data: conflicts } = await supabase
-        .from('lessons')
-        .select('id')
-        .eq('scheduled_date', formData.scheduled_date)
-        .or(
-          `and(teacher_id.eq.${formData.teacher_id}, start_time.lte.${formData.end_time}, end_time.gte.${formData.start_time})`
-        );
-
-      if (conflicts && conflicts.length > 0) {
-        toast.error('This teacher already has a lesson at this time.');
+      if (duration <= 0) {
+        toast.error('End time must be after start time.');
         setLoading(false);
         return;
       }
 
-      const lessonData = {
+      // Check for teacher scheduling conflicts
+      const { data: conflicts } = await supabase
+        .from('lessons')
+        .select('id')
+        .eq('scheduled_date', formData.scheduled_date)
+        .eq('teacher_id', formData.teacher_id)
+        .neq('status', 'cancelled')
+        .lte('start_time', formData.end_time)
+        .gte('end_time', formData.start_time);
+
+      if (conflicts && conflicts.length > 0) {
+        toast.error('This teacher already has a lesson scheduled at this time.');
+        setLoading(false);
+        return;
+      }
+
+      const { error } = await supabase.from('lessons').insert({
         student_id: formData.student_id,
         teacher_id: formData.teacher_id,
         subject_id: formData.subject_id,
-        title: formData.title,
-        description: formData.description,
+        title: formData.title.trim(),
+        description: formData.description.trim() || null,
         scheduled_date: formData.scheduled_date,
         start_time: formData.start_time,
         end_time: formData.end_time,
         duration_minutes: duration,
         meeting_platform: formData.meeting_platform,
-        meeting_url: formData.meeting_url,
-        notes: formData.notes,
+        meeting_url: formData.meeting_url.trim(),
+        notes: formData.notes.trim() || null,
         created_by: user?.id,
-        status: 'scheduled'
-      };
-
-      const { error } = await supabase
-        .from('lessons')
-        .insert(lessonData);
+        status: 'scheduled',
+        is_recurring: false,
+      });
 
       if (error) throw error;
 
       toast.success('Lesson scheduled successfully!');
       onSuccess();
       onClose();
-    } catch (error) {
-      toast.error('Failed to schedule lesson');
+      // Reset form
+      setFormData({
+        student_id: '',
+        teacher_id: '',
+        subject_id: '',
+        title: '',
+        description: '',
+        scheduled_date: '',
+        start_time: '',
+        end_time: '',
+        meeting_platform: 'zoom',
+        meeting_url: '',
+        notes: ''
+      });
+    } catch (error: any) {
       console.error('Error creating lesson:', error);
+      toast.error(error.message || 'Failed to schedule lesson.');
     } finally {
       setLoading(false);
     }
@@ -139,22 +192,23 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
         <DialogHeader>
           <DialogTitle>Schedule New Lesson</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="student_id">Student</Label>
               <select
                 id="student_id"
-                className="w-full rounded-md border border-input bg-transparent px-3 py-2"
+                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
                 value={formData.student_id}
                 onChange={(e) => setFormData({ ...formData, student_id: e.target.value })}
                 required
+                disabled={fetchingData}
               >
-                <option value="">Select student</option>
-                {students.map((student: Student) => (
-                  <option key={student.id} value={student.id}>
-                    {student.profile?.full_name || 'Unnamed Student'}
-                  </option>
+                <option value="">
+                  {fetchingData ? 'Loading students…' : students.length === 0 ? 'No active students' : 'Select student'}
+                </option>
+                {students.map((s) => (
+                  <option key={s.id} value={s.id}>{s.full_name}</option>
                 ))}
               </select>
             </div>
@@ -162,16 +216,17 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
               <Label htmlFor="teacher_id">Teacher</Label>
               <select
                 id="teacher_id"
-                className="w-full rounded-md border border-input bg-transparent px-3 py-2"
+                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
                 value={formData.teacher_id}
                 onChange={(e) => setFormData({ ...formData, teacher_id: e.target.value })}
                 required
+                disabled={fetchingData}
               >
-                <option value="">Select teacher</option>
-                {teachers.map((teacher: Teacher) => (
-                  <option key={teacher.id} value={teacher.id}>
-                    {teacher.profile?.full_name || 'Unnamed Teacher'}
-                  </option>
+                <option value="">
+                  {fetchingData ? 'Loading teachers…' : teachers.length === 0 ? 'No active teachers' : 'Select teacher'}
+                </option>
+                {teachers.map((t) => (
+                  <option key={t.id} value={t.id}>{t.full_name}</option>
                 ))}
               </select>
             </div>
@@ -179,16 +234,17 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
               <Label htmlFor="subject_id">Subject</Label>
               <select
                 id="subject_id"
-                className="w-full rounded-md border border-input bg-transparent px-3 py-2"
+                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
                 value={formData.subject_id}
                 onChange={(e) => setFormData({ ...formData, subject_id: e.target.value })}
                 required
+                disabled={fetchingData}
               >
-                <option value="">Select subject</option>
-                {subjects.map((subject: Subject) => (
-                  <option key={subject.id} value={subject.id}>
-                    {subject.name}
-                  </option>
+                <option value="">
+                  {fetchingData ? 'Loading subjects…' : 'Select subject'}
+                </option>
+                {subjects.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
             </div>
@@ -252,7 +308,7 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
               <Label htmlFor="meeting_platform">Meeting Platform</Label>
               <select
                 id="meeting_platform"
-                className="w-full rounded-md border border-input bg-transparent px-3 py-2"
+                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
                 value={formData.meeting_platform}
                 onChange={(e) => setFormData({ ...formData, meeting_platform: e.target.value })}
               >
@@ -285,11 +341,11 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
               Cancel
             </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? 'Scheduling...' : 'Schedule Lesson'}
+            <Button type="submit" disabled={loading || fetchingData}>
+              {loading ? 'Scheduling…' : 'Schedule Lesson'}
             </Button>
           </DialogFooter>
         </form>

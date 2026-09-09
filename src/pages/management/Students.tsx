@@ -10,8 +10,13 @@ import { Student } from '@/types';
 import { Search, Plus, Eye, Edit, Trash2 } from 'lucide-react';
 import { AddStudentModal } from '@/components/management/AddStudentModal';
 
+// Augmented type that includes email merged from the users table
+interface StudentRow extends Student {
+  email?: string;
+}
+
 export function Students() {
-  const [students, setStudents] = useState<Student[]>([]);
+  const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -23,41 +28,59 @@ export function Students() {
 
   const fetchStudents = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('students')
-      .select(`
-        *,
-        profile:id (
-          full_name,
-          phone,
-          avatar_url
-        ),
-        user:id (
-          email
-        )
-      `)
-      .order('created_at', { ascending: false });
+    try {
+      // Fetch student rows
+      const { data: studentRows, error: studentsError } = await supabase
+        .from('students')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching students:', error);
+      if (studentsError) {
+        console.error('Error fetching students:', studentsError);
+        setLoading(false);
+        return;
+      }
+
+      if (!studentRows || studentRows.length === 0) {
+        setStudents([]);
+        setLoading(false);
+        return;
+      }
+
+      const ids = studentRows.map((s) => s.id);
+
+      // Fetch profiles and users in parallel
+      const [{ data: profiles }, { data: users }] = await Promise.all([
+        supabase.from('profiles').select('id, full_name, phone, avatar_url').in('id', ids),
+        supabase.from('users').select('id, email').in('id', ids),
+      ]);
+
+      // Merge everything into one object per student
+      const enriched: StudentRow[] = studentRows.map((s) => {
+        const profile = profiles?.find((p) => p.id === s.id);
+        const user = users?.find((u) => u.id === s.id);
+        return {
+          ...s,
+          email: user?.email,
+          profile: profile
+            ? { id: profile.id, full_name: profile.full_name, phone: profile.phone, avatar_url: profile.avatar_url }
+            : undefined,
+        };
+      });
+
+      setStudents(enriched);
+    } catch (err) {
+      console.error('Unexpected error loading students:', err);
+    } finally {
+      setLoading(false);
     }
-
-    // Merge email into profile for consistent access pattern used by the table
-    const enriched = (data || []).map((s: any) => ({
-      ...s,
-      profile: s.profile
-        ? { ...s.profile, email: s.user?.email }
-        : undefined,
-    }));
-
-    setStudents(enriched);
-    setLoading(false);
   };
 
-  const filteredStudents = students.filter(student =>
-    student.profile?.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-    (student.profile as any)?.email?.toLowerCase().includes(search.toLowerCase()) ||
-    student.student_id?.toLowerCase().includes(search.toLowerCase())
+  const filteredStudents = students.filter(
+    (s) =>
+      s.profile?.full_name?.toLowerCase().includes(search.toLowerCase()) ||
+      s.email?.toLowerCase().includes(search.toLowerCase()) ||
+      s.student_id?.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -115,8 +138,8 @@ export function Students() {
                 filteredStudents.map((student) => (
                   <TableRow key={student.id}>
                     <TableCell className="font-mono text-sm">{student.student_id}</TableCell>
-                    <TableCell className="font-medium">{student.profile?.full_name}</TableCell>
-                    <TableCell>{(student.profile as any)?.email || '-'}</TableCell>
+                    <TableCell className="font-medium">{student.profile?.full_name || '-'}</TableCell>
+                    <TableCell>{student.email || '-'}</TableCell>
                     <TableCell>{student.profile?.phone || '-'}</TableCell>
                     <TableCell>
                       <Badge variant={student.is_active ? 'success' : 'secondary'}>
