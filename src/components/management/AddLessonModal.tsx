@@ -60,15 +60,20 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
   }, [open]);
 
   const fetchData = async () => {
-    const [studentsRes, teachersRes, subjectsRes] = await Promise.all([
-      supabase.from('students').select('*, profile:user_id(*)').eq('is_active', true),
-      supabase.from('teachers').select('*, profile:user_id(*)').eq('is_active', true),
-      supabase.from('subjects').select('*')
-    ]);
+    try {
+      const [studentsRes, teachersRes, subjectsRes] = await Promise.all([
+        supabase.from('students').select('*, profile:user_id(*)').eq('is_active', true),
+        supabase.from('teachers').select('*, profile:user_id(*)').eq('is_active', true),
+        supabase.from('subjects').select('*')
+      ]);
 
-    setStudents(studentsRes.data as Student[] || []);
-    setTeachers(teachersRes.data as Teacher[] || []);
-    setSubjects(subjectsRes.data as Subject[] || []);
+      setStudents((studentsRes.data as Student[]) || []);
+      setTeachers((teachersRes.data as Teacher[]) || []);
+      setSubjects((subjectsRes.data as Subject[]) || []);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      toast.error('Failed to load data');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
