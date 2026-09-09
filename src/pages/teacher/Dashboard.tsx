@@ -26,11 +26,21 @@ export function TeacherDashboard() {
   });
   const [loading, setLoading] = useState(true);
 
+  // Run when user is first available
   useEffect(() => {
     if (user) {
       fetchTeacherData();
     }
   }, [user]);
+
+  // Also re-fetch every time the component mounts (e.g. after returning from
+  // the report form) so earnings and lesson statuses are always up to date.
+  useEffect(() => {
+    if (user) {
+      fetchTeacherData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Attach student names + subjects using separate round-trips instead of the
   // broken `profile:user_id(...)` embed that previously failed the whole query.

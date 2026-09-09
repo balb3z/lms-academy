@@ -305,7 +305,7 @@ export function StudentDashboard() {
                       {report.performance_rating}
                     </Badge>
                   </div>
-                  <Button variant="outline" onClick={() => navigate(`/student/reports/${report.id}`)}>
+                  <Button variant="outline" onClick={() => navigate('/student/reports')}>
                     <FileText className="h-4 w-4 mr-2" />
                     View
                   </Button>

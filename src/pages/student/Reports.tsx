@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
@@ -12,6 +13,7 @@ import { formatDate } from '@/utils/format';
 
 export function StudentReports() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [reports, setReports] = useState<LessonReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -118,7 +120,12 @@ export function StudentReports() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate(`/student/lessons/${report.lesson_id}`)}
+                        aria-label="View report"
+                      >
                         <Eye className="h-4 w-4" />
                       </Button>
                     </TableCell>
