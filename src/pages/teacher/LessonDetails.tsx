@@ -6,34 +6,53 @@ import { Button } from '@/components/ui/Button';
 import { supabase } from '@/lib/supabase/client';
 import { Lesson } from '@/types';
 import { formatDate, formatTime } from '@/utils/format';
-import { ArrowLeft, Calendar, Clock, User, Video, BookOpen } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, Video, BookOpen } from 'lucide-react';
+import { toast } from 'react-toastify';
 
 export function TeacherLessonDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [lesson, setLesson] = useState<Lesson | null>(null);
+  const [studentName, setStudentName] = useState('');
+  const [studentEmail, setStudentEmail] = useState('');
+  const [zoomLink, setZoomLink] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchLesson();
+    if (id) fetchLesson();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const fetchLesson = async () => {
-    const { data } = await supabase
-      .from('lessons')
-      .select(`
-        *,
-        student:student_id (
-          id,
-          profile:user_id (full_name, email, phone)
-        ),
-        subject:subject_id (*)
-      `)
-      .eq('id', id)
-      .single();
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.from('lessons').select('*').eq('id', id).single();
+      if (error || !data) {
+        setLesson(null);
+        setLoading(false);
+        return;
+      }
+      setLesson(data);
 
-    setLesson(data);
-    setLoading(false);
+      // Resolve related data with separate round-trips (no broken embeds).
+      const [subjectRes, studentProfileRes, studentUserRes, teacherRes] = await Promise.all([
+        data.subject_id
+          ? supabase.from('subjects').select('id, name, color').eq('id', data.subject_id).single()
+          : Promise.resolve({ data: null }),
+        supabase.from('profiles').select('full_name').eq('id', data.student_id).single(),
+        supabase.from('users').select('email').eq('id', data.student_id).single(),
+        supabase.from('teachers').select('zoom_link').eq('id', data.teacher_id).single(),
+      ]);
+
+      setLesson(prev => (prev ? { ...prev, subject: subjectRes.data || undefined } : prev));
+      setStudentName(studentProfileRes.data?.full_name || 'Student');
+      setStudentEmail(studentUserRes.data?.email || '');
+      setZoomLink(teacherRes.data?.zoom_link || null);
+    } catch (err) {
+      console.error('Error loading lesson:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getStatusVariant = (status: string) => {
@@ -47,25 +66,34 @@ export function TeacherLessonDetails() {
     }
   };
 
+  const resolveLink = () => zoomLink || lesson?.meeting_url || null;
+
   const handleStartLesson = async () => {
     if (!lesson) return;
-    
-    const { error } = await supabase
-      .from('lessons')
-      .update({
-        status: 'live',
-        actual_start_time: new Date().toISOString()
-      })
-      .eq('id', id);
-
-    if (!error && lesson.meeting_url) {
-      window.open(lesson.meeting_url, '_blank');
-      fetchLesson();
+    const link = resolveLink();
+    if (!link) {
+      toast.error('No Zoom link set. Ask management to add your personal Zoom link.');
+      return;
     }
+
+    const { data, error } = await supabase
+      .from('lessons')
+      .update({ status: 'live', actual_start_time: new Date().toISOString() })
+      .eq('id', id)
+      .select('id');
+
+    if (error || !data || data.length === 0) {
+      toast.error('Could not start the lesson.');
+      return;
+    }
+    window.open(link, '_blank', 'noopener,noreferrer');
+    fetchLesson();
   };
 
-  const handleEndLesson = () => {
-    navigate(`/teacher/lessons/${id}/report`);
+  const handleJoin = () => {
+    const link = resolveLink();
+    if (link) window.open(link, '_blank', 'noopener,noreferrer');
+    else toast.error('No Zoom link set.');
   };
 
   if (loading) {
@@ -79,7 +107,7 @@ export function TeacherLessonDetails() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Button variant="outline" size="icon" onClick={() => navigate('/teacher/lessons')}>
+        <Button variant="outline" size="icon" onClick={() => navigate('/teacher/lessons')} aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
@@ -105,10 +133,12 @@ export function TeacherLessonDetails() {
               <Clock className="h-4 w-4 text-muted-foreground" />
               <span>{formatTime(lesson.start_time)} - {formatTime(lesson.end_time)}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <BookOpen className="h-4 w-4 text-muted-foreground" />
-              <span>Subject: {lesson.subject?.name}</span>
-            </div>
+            {lesson.subject?.name && (
+              <div className="flex items-center gap-2">
+                <BookOpen className="h-4 w-4 text-muted-foreground" />
+                <span>Subject: {lesson.subject.name}</span>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Video className="h-4 w-4 text-muted-foreground" />
               <span>Platform: {lesson.meeting_platform}</span>
@@ -122,9 +152,8 @@ export function TeacherLessonDetails() {
           </CardHeader>
           <CardContent>
             <div>
-              <p className="font-medium">{lesson.student?.profile?.full_name}</p>
-              <p className="text-sm text-muted-foreground">{lesson.student?.profile?.email}</p>
-              <p className="text-sm text-muted-foreground">{lesson.student?.profile?.phone}</p>
+              <p className="font-medium">{studentName}</p>
+              <p className="text-sm text-muted-foreground">{studentEmail}</p>
             </div>
           </CardContent>
         </Card>
@@ -144,7 +173,7 @@ export function TeacherLessonDetails() {
           <CardHeader>
             <CardTitle>Actions</CardTitle>
           </CardHeader>
-          <CardContent className="flex gap-4">
+          <CardContent className="flex flex-wrap gap-4">
             {lesson.status === 'scheduled' && (
               <Button onClick={handleStartLesson}>
                 <Video className="h-4 w-4 mr-2" />
@@ -153,11 +182,12 @@ export function TeacherLessonDetails() {
             )}
             {lesson.status === 'live' && (
               <>
-                <Button variant="outline" onClick={() => window.open(lesson.meeting_url, '_blank')}>
+                <Button variant="outline" onClick={handleJoin}>
+                  <Video className="h-4 w-4 mr-2" />
                   Join Meeting
                 </Button>
-                <Button onClick={handleEndLesson}>
-                  End Meeting & Create Report
+                <Button onClick={() => navigate(`/teacher/lessons/${id}/report`)}>
+                  End Meeting
                 </Button>
               </>
             )}

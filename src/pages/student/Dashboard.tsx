@@ -21,6 +21,7 @@ export function StudentDashboard() {
     absent: 0,
     rate: 0,
   });
+  const [progress, setProgress] = useState({ completed: 0, remaining: 0 });
   const [recentReports, setRecentReports] = useState<LessonReport[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,6 +117,15 @@ export function StudentDashboard() {
         absent,
         rate: total > 0 ? Math.round((present / total) * 100) : 0,
       });
+
+      // Remaining lessons = scheduled (not yet completed/cancelled); completed count for progress
+      const [{ count: completedCount }, { count: remainingCount }] = await Promise.all([
+        supabase.from('lessons').select('*', { count: 'exact', head: true })
+          .eq('student_id', studentId).eq('status', 'completed'),
+        supabase.from('lessons').select('*', { count: 'exact', head: true })
+          .eq('student_id', studentId).eq('status', 'scheduled'),
+      ]);
+      setProgress({ completed: completedCount || 0, remaining: remainingCount || 0 });
 
       // Reports: lesson embed is valid; resolve teacher names separately
       const { data: reportRows } = await supabase
@@ -242,8 +252,10 @@ export function StudentDashboard() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatsCard title="Attendance Rate" value={`${attendanceStats.rate}%`} icon="attendance" />
+        <StatsCard title="Completed" value={progress.completed} icon="check" />
+        <StatsCard title="Lessons Left" value={progress.remaining} icon="lessons" />
         <StatsCard title="Present" value={attendanceStats.present} icon="check" />
         <StatsCard title="Late" value={attendanceStats.late} icon="clock" />
         <StatsCard title="Absent" value={attendanceStats.absent} icon="users" />

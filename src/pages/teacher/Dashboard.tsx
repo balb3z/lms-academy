@@ -297,10 +297,15 @@ export function TeacherDashboard() {
                       </Button>
                     )}
                     {lesson.status === 'live' && (
-                      <Button variant="outline" onClick={() => handleJoin(lesson)}>
-                        <Video className="h-4 w-4 mr-2" />
-                        Join Meeting
-                      </Button>
+                      <>
+                        <Button variant="outline" onClick={() => handleJoin(lesson)}>
+                          <Video className="h-4 w-4 mr-2" />
+                          Join
+                        </Button>
+                        <Button onClick={() => navigate(`/teacher/lessons/${lesson.id}/report`)}>
+                          End Meeting
+                        </Button>
+                      </>
                     )}
                   </div>
                 </div>

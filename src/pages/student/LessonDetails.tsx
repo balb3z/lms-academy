@@ -4,36 +4,76 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { supabase } from '@/lib/supabase/client';
-import { Lesson } from '@/types';
+import { Lesson, LessonReport } from '@/types';
 import { formatDate, formatTime } from '@/utils/format';
-import { ArrowLeft, Calendar, Clock, User, Video, BookOpen } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, Video, BookOpen, Award, ClipboardList, GraduationCap } from 'lucide-react';
+
+const RATING_LABEL: Record<string, string> = {
+  excellent: 'Excellent',
+  very_good: 'Very Good',
+  good: 'Good',
+  needs_improvement: 'Needs Improvement',
+};
+
+const RATING_VARIANT: Record<string, any> = {
+  excellent: 'success',
+  very_good: 'success',
+  good: 'info',
+  needs_improvement: 'warning',
+};
 
 export function StudentLessonDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [lesson, setLesson] = useState<Lesson | null>(null);
+  const [report, setReport] = useState<LessonReport | null>(null);
+  const [teacherName, setTeacherName] = useState('');
+  const [teacherEmail, setTeacherEmail] = useState('');
+  const [zoomLink, setZoomLink] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchLesson();
+    if (id) fetchLesson();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const fetchLesson = async () => {
-    const { data } = await supabase
-      .from('lessons')
-      .select(`
-        *,
-        teacher:teacher_id (
-          id,
-          profile:user_id (full_name, email, phone)
-        ),
-        subject:subject_id (*)
-      `)
-      .eq('id', id)
-      .single();
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.from('lessons').select('*').eq('id', id).single();
+      if (error || !data) {
+        setLesson(null);
+        setLoading(false);
+        return;
+      }
+      setLesson(data);
 
-    setLesson(data);
-    setLoading(false);
+      const [subjectRes, teacherProfileRes, teacherUserRes, teacherRes, reportRes] = await Promise.all([
+        data.subject_id
+          ? supabase.from('subjects').select('id, name, color').eq('id', data.subject_id).single()
+          : Promise.resolve({ data: null }),
+        supabase.from('profiles').select('full_name').eq('id', data.teacher_id).single(),
+        supabase.from('users').select('email').eq('id', data.teacher_id).single(),
+        supabase.from('teachers').select('zoom_link').eq('id', data.teacher_id).single(),
+        supabase
+          .from('lesson_reports')
+          .select('*')
+          .eq('lesson_id', id)
+          .eq('is_visible_to_student', true)
+          .order('submitted_at', { ascending: false })
+          .limit(1),
+      ]);
+
+      setLesson(prev => (prev ? { ...prev, subject: subjectRes.data || undefined } : prev));
+      setTeacherName(teacherProfileRes.data?.full_name || 'Teacher');
+      setTeacherEmail(teacherUserRes.data?.email || '');
+      setZoomLink(teacherRes.data?.zoom_link || null);
+      setReport(((reportRes.data as LessonReport[]) || [])[0] || null);
+    } catch (err) {
+      console.error('Error loading lesson:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getStatusVariant = (status: string) => {
@@ -47,6 +87,12 @@ export function StudentLessonDetails() {
     }
   };
 
+  const link = zoomLink || lesson?.meeting_url || null;
+
+  const handleEnter = () => {
+    if (link) window.open(link, '_blank', 'noopener,noreferrer');
+  };
+
   if (loading) {
     return <div className="flex items-center justify-center h-64">Loading...</div>;
   }
@@ -58,7 +104,7 @@ export function StudentLessonDetails() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Button variant="outline" size="icon" onClick={() => navigate('/student/lessons')}>
+        <Button variant="outline" size="icon" onClick={() => navigate('/student/lessons')} aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
@@ -84,10 +130,12 @@ export function StudentLessonDetails() {
               <Clock className="h-4 w-4 text-muted-foreground" />
               <span>{formatTime(lesson.start_time)} - {formatTime(lesson.end_time)}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <BookOpen className="h-4 w-4 text-muted-foreground" />
-              <span>Subject: {lesson.subject?.name}</span>
-            </div>
+            {lesson.subject?.name && (
+              <div className="flex items-center gap-2">
+                <BookOpen className="h-4 w-4 text-muted-foreground" />
+                <span>Subject: {lesson.subject.name}</span>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Video className="h-4 w-4 text-muted-foreground" />
               <span>Platform: {lesson.meeting_platform}</span>
@@ -101,10 +149,23 @@ export function StudentLessonDetails() {
           </CardHeader>
           <CardContent>
             <div>
-              <p className="font-medium">{lesson.teacher?.profile?.full_name}</p>
-              <p className="text-sm text-muted-foreground">{lesson.teacher?.profile?.email}</p>
-              <p className="text-sm text-muted-foreground">{lesson.teacher?.profile?.phone}</p>
+              <p className="font-medium">{teacherName}</p>
+              <p className="text-sm text-muted-foreground">{teacherEmail}</p>
             </div>
+            {(lesson.status === 'scheduled' || lesson.status === 'live') && (
+              <div className="mt-4">
+                {link ? (
+                  <Button onClick={handleEnter}>
+                    <Video className="h-4 w-4 mr-2" />
+                    Enter
+                  </Button>
+                ) : (
+                  <Button variant="outline" disabled>
+                    No link yet
+                  </Button>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -119,19 +180,91 @@ export function StudentLessonDetails() {
           </Card>
         )}
 
-        {lesson.status === 'live' && lesson.meeting_url && (
+        {/* Completed-lesson report: grade, covered topics, homework */}
+        {report ? (
           <Card className="md:col-span-2">
             <CardHeader>
-              <CardTitle>Meeting</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <ClipboardList className="h-5 w-5" />
+                Lesson Report
+              </CardTitle>
             </CardHeader>
-            <CardContent>
-              <Button onClick={() => window.open(lesson.meeting_url, '_blank')}>
-                <Video className="h-4 w-4 mr-2" />
-                Join Meeting
-              </Button>
+            <CardContent className="space-y-5">
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Award className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">Grade:</span>
+                  {report.performance_rating ? (
+                    <Badge variant={RATING_VARIANT[report.performance_rating] ?? 'default'}>
+                      {RATING_LABEL[report.performance_rating] ?? report.performance_rating}
+                    </Badge>
+                  ) : (
+                    <span className="text-sm">-</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <GraduationCap className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">Attendance:</span>
+                  <Badge variant="secondary">{report.attendance_status}</Badge>
+                </div>
+              </div>
+
+              {report.topics_covered && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">What Was Covered</p>
+                  <p className="whitespace-pre-wrap text-sm">{report.topics_covered}</p>
+                </div>
+              )}
+
+              {report.what_was_taught && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Additional Detail</p>
+                  <p className="whitespace-pre-wrap text-sm">{report.what_was_taught}</p>
+                </div>
+              )}
+
+              <div className="rounded-lg border bg-muted/30 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Homework / To-Submit</p>
+                <p className="whitespace-pre-wrap text-sm">{report.homework || 'No homework assigned.'}</p>
+              </div>
+
+              {(report.strengths || report.weaknesses || report.student_performance) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {report.student_performance && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Performance</p>
+                      <p className="whitespace-pre-wrap text-sm">{report.student_performance}</p>
+                    </div>
+                  )}
+                  {report.strengths && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Strengths</p>
+                      <p className="whitespace-pre-wrap text-sm">{report.strengths}</p>
+                    </div>
+                  )}
+                  {report.weaknesses && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Areas to Improve</p>
+                      <p className="whitespace-pre-wrap text-sm">{report.weaknesses}</p>
+                    </div>
+                  )}
+                  {report.next_lesson_plan && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Next Lesson Plan</p>
+                      <p className="whitespace-pre-wrap text-sm">{report.next_lesson_plan}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
-        )}
+        ) : lesson.status === 'completed' ? (
+          <Card className="md:col-span-2">
+            <CardContent className="py-6 text-center text-muted-foreground">
+              This lesson is completed. The report is not available yet.
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     </div>
   );
