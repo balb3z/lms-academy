@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
@@ -8,11 +8,13 @@ import { Badge } from '@/components/ui/Badge';
 import { supabase } from '@/lib/supabase/client';
 import { Teacher } from '@/types';
 import { Search, Plus, Eye, Edit, Trash2, UserCog } from 'lucide-react';
+import { AddTeacherModal } from '@/components/management/AddTeacherModal';
 
 export function Teachers() {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [showAddModal, setShowAddModal] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -20,26 +22,41 @@ export function Teachers() {
   }, []);
 
   const fetchTeachers = async () => {
-    const { data } = await supabase
+    setLoading(true);
+    const { data, error } = await supabase
       .from('teachers')
       .select(`
         *,
-        profile:user_id (
+        profile:id (
           full_name,
-          email,
           phone,
           avatar_url
+        ),
+        user:id (
+          email
         )
       `)
       .order('created_at', { ascending: false });
 
-    setTeachers(data || []);
+    if (error) {
+      console.error('Error fetching teachers:', error);
+    }
+
+    // Merge email into profile for consistent access pattern used by the table
+    const enriched = (data || []).map((t: any) => ({
+      ...t,
+      profile: t.profile
+        ? { ...t.profile, email: t.user?.email }
+        : undefined,
+    }));
+
+    setTeachers(enriched);
     setLoading(false);
   };
 
   const filteredTeachers = teachers.filter(teacher =>
     teacher.profile?.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-    teacher.profile?.email?.toLowerCase().includes(search.toLowerCase()) ||
+    (teacher.profile as any)?.email?.toLowerCase().includes(search.toLowerCase()) ||
     teacher.teacher_id?.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -50,7 +67,7 @@ export function Teachers() {
           <h1 className="text-3xl font-bold">Teachers</h1>
           <p className="text-muted-foreground">Manage all teachers in the academy</p>
         </div>
-        <Button>
+        <Button onClick={() => setShowAddModal(true)}>
           <Plus className="h-4 w-4 mr-2" />
           Add Teacher
         </Button>
@@ -99,7 +116,7 @@ export function Teachers() {
                   <TableRow key={teacher.id}>
                     <TableCell className="font-mono text-sm">{teacher.teacher_id}</TableCell>
                     <TableCell className="font-medium">{teacher.profile?.full_name}</TableCell>
-                    <TableCell>{teacher.profile?.email}</TableCell>
+                    <TableCell>{(teacher.profile as any)?.email || '-'}</TableCell>
                     <TableCell>{teacher.specialization || '-'}</TableCell>
                     <TableCell>
                       <Badge variant={teacher.is_active ? 'success' : 'secondary'}>
@@ -112,16 +129,17 @@ export function Teachers() {
                           variant="ghost"
                           size="icon"
                           onClick={() => navigate(`/management/teachers/${teacher.id}`)}
+                          aria-label="View teacher"
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon">
+                        <Button variant="ghost" size="icon" aria-label="Manage teacher">
                           <UserCog className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon">
+                        <Button variant="ghost" size="icon" aria-label="Edit teacher">
                           <Edit className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="text-destructive">
+                        <Button variant="ghost" size="icon" className="text-destructive" aria-label="Delete teacher">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -133,6 +151,12 @@ export function Teachers() {
           </Table>
         </CardContent>
       </Card>
+
+      <AddTeacherModal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onSuccess={fetchTeachers}
+      />
     </div>
   );
 }

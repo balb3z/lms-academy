@@ -8,6 +8,8 @@ import { formatTime } from '@/utils/format';
 import { Lesson } from '@/types';
 import { Calendar, Plus, Users, UserCog, BookOpen } from 'lucide-react';
 import { AddLessonModal } from '@/components/management/AddLessonModal';
+import { AddStudentModal } from '@/components/management/AddStudentModal';
+import { AddTeacherModal } from '@/components/management/AddTeacherModal';
 
 export function ManagementDashboard() {
   const [stats, setStats] = useState({
@@ -21,6 +23,8 @@ export function ManagementDashboard() {
   const [todayLessons, setTodayLessons] = useState<Lesson[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddLesson, setShowAddLesson] = useState(false);
+  const [showAddStudent, setShowAddStudent] = useState(false);
+  const [showAddTeacher, setShowAddTeacher] = useState(false);
 
   useEffect(() => {
     fetchDashboardData();
@@ -54,11 +58,11 @@ export function ManagementDashboard() {
           *,
           student:student_id (
             id,
-            profile:user_id (full_name)
+            profile:id (full_name)
           ),
           teacher:teacher_id (
             id,
-            profile:user_id (full_name)
+            profile:id (full_name)
           ),
           subject:subject_id (*)
         `)
@@ -128,15 +132,27 @@ export function ManagementDashboard() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Button variant="outline" className="h-20 flex flex-col gap-1" onClick={() => {}}>
+        <Button
+          variant="outline"
+          className="h-20 flex flex-col gap-1"
+          onClick={() => setShowAddStudent(true)}
+        >
           <Users className="h-5 w-5" />
           <span className="text-xs">Add Student</span>
         </Button>
-        <Button variant="outline" className="h-20 flex flex-col gap-1" onClick={() => {}}>
+        <Button
+          variant="outline"
+          className="h-20 flex flex-col gap-1"
+          onClick={() => setShowAddTeacher(true)}
+        >
           <UserCog className="h-5 w-5" />
           <span className="text-xs">Add Teacher</span>
         </Button>
-        <Button variant="outline" className="h-20 flex flex-col gap-1" onClick={() => setShowAddLesson(true)}>
+        <Button
+          variant="outline"
+          className="h-20 flex flex-col gap-1"
+          onClick={() => setShowAddLesson(true)}
+        >
           <Calendar className="h-5 w-5" />
           <span className="text-xs">Schedule Lesson</span>
         </Button>
@@ -195,6 +211,18 @@ export function ManagementDashboard() {
           setShowAddLesson(false);
           fetchDashboardData();
         }}
+      />
+
+      <AddStudentModal
+        open={showAddStudent}
+        onClose={() => setShowAddStudent(false)}
+        onSuccess={fetchDashboardData}
+      />
+
+      <AddTeacherModal
+        open={showAddTeacher}
+        onClose={() => setShowAddTeacher(false)}
+        onSuccess={fetchDashboardData}
       />
     </div>
   );
