@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
@@ -13,7 +12,6 @@ import { formatDate } from '@/utils/format';
 
 export function StudentReports() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [reports, setReports] = useState<LessonReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -27,21 +25,34 @@ export function StudentReports() {
   const fetchReports = async () => {
     const studentId = user?.id;
 
-    const { data } = await supabase
+    // Fetch reports + lesson in one query. Teacher name is resolved separately
+    // because lesson_reports.teacher_id is the auth user id, which maps to
+    // profiles.id — there is no user_id FK on the teachers table to join through.
+    const { data: rows } = await supabase
       .from('lesson_reports')
-      .select(`
-        *,
-        lesson:lesson_id (*),
-        teacher:teacher_id (
-          id,
-          profile:user_id (full_name)
-        )
-      `)
+      .select('*, lesson:lesson_id (*)')
       .eq('student_id', studentId)
       .eq('is_visible_to_student', true)
       .order('submitted_at', { ascending: false });
 
-    setReports(data || []);
+    if (!rows || rows.length === 0) {
+      setReports([]);
+      setLoading(false);
+      return;
+    }
+
+    // Resolve teacher names from profiles using teacher_id directly.
+    const teacherIds = [...new Set(rows.map((r: any) => r.teacher_id).filter(Boolean))];
+    const { data: profiles } = teacherIds.length > 0
+      ? await supabase.from('profiles').select('id, full_name').in('id', teacherIds)
+      : { data: [] as any[] };
+
+    const enriched = rows.map((r: any) => {
+      const p = (profiles || []).find((pr: any) => pr.id === r.teacher_id);
+      return { ...r, teacher: { id: r.teacher_id, profile: p ? { full_name: p.full_name } : undefined } };
+    });
+
+    setReports(enriched);
     setLoading(false);
   };
 
@@ -120,12 +131,7 @@ export function StudentReports() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => navigate(`/student/lessons/${report.lesson_id}`)}
-                        aria-label="View report"
-                      >
+                      <Button variant="ghost" size="icon">
                         <Eye className="h-4 w-4" />
                       </Button>
                     </TableCell>

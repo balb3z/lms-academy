@@ -26,21 +26,25 @@ export function TeacherDashboard() {
   });
   const [loading, setLoading] = useState(true);
 
-  // Run when user is first available
   useEffect(() => {
-    if (user) {
-      fetchTeacherData();
-    }
-  }, [user]);
+    if (!user) return;
 
-  // Also re-fetch every time the component mounts (e.g. after returning from
-  // the report form) so earnings and lesson statuses are always up to date.
-  useEffect(() => {
-    if (user) {
-      fetchTeacherData();
-    }
+    fetchTeacherData();
+
+    // Re-fetch whenever a lesson row changes for this teacher (e.g. status
+    // flips to 'completed' after submitting the end-meeting report).
+    const channel = supabase
+      .channel('teacher-lessons-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'lessons', filter: `teacher_id=eq.${user.id}` },
+        () => { fetchTeacherData(); },
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user?.id]);
 
   // Attach student names + subjects using separate round-trips instead of the
   // broken `profile:user_id(...)` embed that previously failed the whole query.
