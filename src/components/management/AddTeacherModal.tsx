@@ -42,6 +42,7 @@ interface FormData {
   specialization: string;
   qualification: string;
   years_of_experience: string;
+  zoom_link: string;
 }
 
 type FormErrors = Partial<Record<keyof FormData, string>>;
@@ -65,6 +66,7 @@ export function AddTeacherModal({ open, onClose, onSuccess }: Props) {
     specialization: '',
     qualification: '',
     years_of_experience: '',
+    zoom_link: '',
   });
 
   const [formData, setFormData] = useState<FormData>(blankForm);
@@ -146,6 +148,7 @@ export function AddTeacherModal({ open, onClose, onSuccess }: Props) {
       if (formData.years_of_experience) {
         teacherRow.years_of_experience = Number(formData.years_of_experience);
       }
+      if (formData.zoom_link) teacherRow.zoom_link = formData.zoom_link.trim();
 
       const { error: teacherError } = await supabase.from('teachers').insert(teacherRow);
       if (teacherError) throw new Error(`Teacher record: ${teacherError.message}`);
@@ -300,6 +303,7 @@ export function AddTeacherModal({ open, onClose, onSuccess }: Props) {
                   <Field id="qualification" label="Qualification" />
                   <Field id="years_of_experience" label="Years of Experience" type="number" />
                 </div>
+                <Field id="zoom_link" label="Personal Zoom Meeting Link" type="url" />
               </section>
 
               <DialogFooter>

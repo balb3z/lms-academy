@@ -42,9 +42,12 @@ export function StudentDashboard() {
     const teacherIds = [...new Set(rows.map(r => r.teacher_id).filter(Boolean))];
     const subjectIds = [...new Set(rows.map(r => r.subject_id).filter(Boolean))];
 
-    const [teacherProfilesRes, subjectsRes] = await Promise.all([
+    const [teacherProfilesRes, teacherZoomRes, subjectsRes] = await Promise.all([
       teacherIds.length > 0
         ? supabase.from('profiles').select('id, full_name').in('id', teacherIds)
+        : Promise.resolve({ data: [] as any[] }),
+      teacherIds.length > 0
+        ? supabase.from('teachers').select('id, zoom_link').in('id', teacherIds)
         : Promise.resolve({ data: [] as any[] }),
       subjectIds.length > 0
         ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
@@ -53,10 +56,15 @@ export function StudentDashboard() {
 
     return rows.map(r => {
       const tp = (teacherProfilesRes.data || []).find((p: any) => p.id === r.teacher_id);
+      const tz = (teacherZoomRes.data || []).find((t: any) => t.id === r.teacher_id);
       const subj = (subjectsRes.data || []).find((s: any) => s.id === r.subject_id);
       return {
         ...r,
-        teacher: { id: r.teacher_id, profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined },
+        teacher: {
+          id: r.teacher_id,
+          zoom_link: tz?.zoom_link || undefined,
+          profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined,
+        },
         subject: subj || undefined,
       };
     });
@@ -149,9 +157,10 @@ export function StudentDashboard() {
     setNotifications(data || []);
   };
 
-  const handleJoinMeeting = (lesson: Lesson) => {
-    if (lesson.meeting_url) {
-      window.open(lesson.meeting_url, '_blank', 'noopener,noreferrer');
+  const handleEnter = (lesson: Lesson) => {
+    const link = lesson.teacher?.zoom_link || lesson.meeting_url;
+    if (link) {
+      window.open(link, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -212,18 +221,20 @@ export function StudentDashboard() {
                       </Badge>
                     </div>
                   </div>
-                  {lesson.status === 'live' && lesson.meeting_url && (
-                    <Button onClick={() => handleJoinMeeting(lesson)}>
-                      <Video className="h-4 w-4 mr-2" />
-                      Join Meeting
-                    </Button>
-                  )}
-                  {lesson.status === 'scheduled' && (
-                    <Button variant="outline" disabled>
-                      <Clock className="h-4 w-4 mr-2" />
-                      Waiting to Start
-                    </Button>
-                  )}
+                  {(() => {
+                    const link = lesson.teacher?.zoom_link || lesson.meeting_url;
+                    return link ? (
+                      <Button onClick={() => handleEnter(lesson)}>
+                        <Video className="h-4 w-4 mr-2" />
+                        Enter
+                      </Button>
+                    ) : (
+                      <Button variant="outline" disabled>
+                        <Clock className="h-4 w-4 mr-2" />
+                        No link yet
+                      </Button>
+                    );
+                  })()}
                 </div>
               ))}
             </div>

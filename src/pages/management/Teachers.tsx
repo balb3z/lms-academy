@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase/client';
 import { Teacher } from '@/types';
 import { Search, Plus, Eye, Edit, Trash2, UserCog } from 'lucide-react';
 import { AddTeacherModal } from '@/components/management/AddTeacherModal';
+import { EditTeacherModal } from '@/components/management/EditTeacherModal';
 
 // Augmented type that includes email merged from the users table
 interface TeacherRow extends Teacher {
@@ -20,6 +21,7 @@ export function Teachers() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editTeacherId, setEditTeacherId] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -159,7 +161,7 @@ export function Teachers() {
                         <Button variant="ghost" size="icon" aria-label="Manage teacher">
                           <UserCog className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" aria-label="Edit teacher">
+                        <Button variant="ghost" size="icon" aria-label="Edit teacher" onClick={() => setEditTeacherId(teacher.id)}>
                           <Edit className="h-4 w-4" />
                         </Button>
                         <Button variant="ghost" size="icon" className="text-destructive" aria-label="Delete teacher">
@@ -179,6 +181,13 @@ export function Teachers() {
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
         onSuccess={fetchTeachers}
+      />
+
+      <EditTeacherModal
+        open={editTeacherId !== null}
+        onClose={() => setEditTeacherId(null)}
+        onSuccess={fetchTeachers}
+        teacherId={editTeacherId}
       />
     </div>
   );

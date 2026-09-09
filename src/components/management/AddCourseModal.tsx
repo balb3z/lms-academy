@@ -22,6 +22,7 @@ interface TeacherOption {
   id: string;
   teacher_id: string;
   full_name: string;
+  zoom_link?: string | null;
 }
 
 interface Props {
@@ -46,6 +47,8 @@ interface FormData {
   payment_type: PaymentType;
   price: string;
   currency: string;
+  student_price: string;
+  teacher_rate: string;
   notes: string;
 }
 
@@ -77,6 +80,8 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
     payment_type: 'monthly',
     price: '',
     currency: 'USD',
+    student_price: '',
+    teacher_rate: '',
     notes: '',
   });
 
@@ -91,7 +96,7 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
     try {
       const [studentsRes, teachersRes] = await Promise.all([
         supabase.from('students').select('id, student_id').eq('is_active', true),
-        supabase.from('teachers').select('id, teacher_id').eq('is_active', true),
+        supabase.from('teachers').select('id, teacher_id, zoom_link').eq('is_active', true),
       ]);
 
       const sIds = (studentsRes.data || []).map((s: any) => s.id);
@@ -116,7 +121,7 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
       setTeachers(
         (teachersRes.data || []).map((t: any) => {
           const p = (tpRes.data || []).find((x: any) => x.id === t.id);
-          return { id: t.id, teacher_id: t.teacher_id, full_name: p?.full_name || `Teacher (${t.teacher_id})` };
+          return { id: t.id, teacher_id: t.teacher_id, full_name: p?.full_name || `Teacher (${t.teacher_id})`, zoom_link: t.zoom_link };
         }),
       );
     } catch (err) {
@@ -199,6 +204,18 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
       if (courseError) throw courseError;
       const courseId = createdCourse.id;
 
+      // Resolve the teacher's Zoom link + the per-lesson rates
+      const selectedTeacher = teachers.find(t => t.id === formData.teacher_id);
+      const teacherZoom = selectedTeacher?.zoom_link || null;
+      const teacherRateNum =
+        formData.teacher_rate && !isNaN(parseFloat(formData.teacher_rate))
+          ? parseFloat(formData.teacher_rate)
+          : null;
+      const studentPriceNum =
+        formData.student_price && !isNaN(parseFloat(formData.student_price))
+          ? parseFloat(formData.student_price)
+          : null;
+
       // Generate and bulk-insert lessons for the initial student
       const lessonRows = buildCourseLessonRows({
         courseId,
@@ -211,6 +228,8 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
         durationMinutes: formData.lesson_duration_minutes,
         startDate: formData.start_date,
         createdBy: user?.id,
+        meetingUrl: teacherZoom,
+        teacherRate: teacherRateNum,
       });
 
       for (let i = 0; i < lessonRows.length; i += 50) {
@@ -227,6 +246,8 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
           student_id: formData.student_id,
           start_date: formData.start_date,
           lessons_generated: lessonRows.length,
+          student_price: studentPriceNum,
+          teacher_rate: teacherRateNum,
           is_active: true,
           enrolled_by: user?.id,
         },
@@ -488,6 +509,35 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
                       value={formData.currency}
                       onChange={e => setFormData(p => ({ ...p, currency: e.target.value.toUpperCase() }))}
                     />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="student_price">Student Price / lesson</Label>
+                    <Input
+                      id="student_price"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      placeholder="0.00"
+                      value={formData.student_price}
+                      onChange={e => setFormData(p => ({ ...p, student_price: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="teacher_rate">Teacher Rate / lesson</Label>
+                    <Input
+                      id="teacher_rate"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      placeholder="0.00"
+                      value={formData.teacher_rate}
+                      onChange={e => setFormData(p => ({ ...p, teacher_rate: e.target.value }))}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      The teacher earns this amount for each completed lesson.
+                    </p>
                   </div>
                 </div>
               </section>

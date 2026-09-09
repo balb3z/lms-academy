@@ -8,18 +8,21 @@ import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Lesson } from '@/types';
 import { formatTime } from '@/utils/format';
-import { Play, FileText } from 'lucide-react';
+import { Play, FileText, Video } from 'lucide-react';
+import { toast } from 'react-toastify';
 
 export function TeacherDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [todayLessons, setTodayLessons] = useState<Lesson[]>([]);
   const [pendingReports, setPendingReports] = useState<Lesson[]>([]);
+  const [zoomLink, setZoomLink] = useState<string | null>(null);
   const [stats, setStats] = useState({
     totalStudents: 0,
     todayLessons: 0,
     completedLessons: 0,
     attendanceRate: 0,
+    earnings: 0,
   });
   const [loading, setLoading] = useState(true);
 
@@ -62,6 +65,14 @@ export function TeacherDashboard() {
     const teacherId = user?.id;
 
     try {
+      // Teacher's own record (for the personal Zoom link)
+      const { data: teacherRow } = await supabase
+        .from('teachers')
+        .select('zoom_link')
+        .eq('id', teacherId)
+        .single();
+      setZoomLink(teacherRow?.zoom_link || null);
+
       // Today's lessons — driven directly by teacher_id so ALL of the teacher's
       // lessons appear (course-generated and manually scheduled alike).
       const { data: todayRows, error: todayError } = await supabase
@@ -97,18 +108,18 @@ export function TeacherDashboard() {
       }
       setPendingReports(pending);
 
+      // Earnings = SUM(teacher_rate) over the teacher's completed lessons.
+      const earnings = (completedRows || []).reduce(
+        (sum: number, l: any) => sum + (Number(l.teacher_rate) || 0),
+        0,
+      );
+
       // Stats
       const { count: totalStudents } = await supabase
         .from('student_teacher_assignments')
         .select('*', { count: 'exact', head: true })
         .eq('teacher_id', teacherId)
         .eq('is_active', true);
-
-      const { count: completedLessons } = await supabase
-        .from('lessons')
-        .select('*', { count: 'exact', head: true })
-        .eq('teacher_id', teacherId)
-        .eq('status', 'completed');
 
       const { data: attendanceData } = await supabase
         .from('attendance')
@@ -121,8 +132,9 @@ export function TeacherDashboard() {
       setStats({
         totalStudents: totalStudents || 0,
         todayLessons: todayEnriched.length,
-        completedLessons: completedLessons || 0,
+        completedLessons: completedRows?.length || 0,
         attendanceRate: totalAttendance > 0 ? Math.round((presentCount / totalAttendance) * 100) : 0,
+        earnings,
       });
     } catch (error) {
       console.error('Error fetching teacher data:', error);
@@ -131,22 +143,40 @@ export function TeacherDashboard() {
     }
   };
 
-  const handleStartLesson = async (lessonId: string) => {
+  // Resolve the link to open: the teacher's saved Zoom link takes priority,
+  // falling back to whatever is stored on the lesson.
+  const resolveLink = (lesson: Lesson) => zoomLink || lesson.meeting_url || null;
+
+  const handleStartLesson = async (lesson: Lesson) => {
+    const link = resolveLink(lesson);
+    if (!link) {
+      toast.error('No Zoom link set. Add your personal Zoom link in your profile.');
+      return;
+    }
+
     const { error } = await supabase
       .from('lessons')
       .update({
         status: 'live',
         actual_start_time: new Date().toISOString(),
       })
-      .eq('id', lessonId);
+      .eq('id', lesson.id);
 
     if (!error) {
-      const lesson = todayLessons.find(l => l.id === lessonId);
-      if (lesson?.meeting_url) {
-        window.open(lesson.meeting_url, '_blank', 'noopener,noreferrer');
-      }
+      window.open(link, '_blank', 'noopener,noreferrer');
       fetchTeacherData();
+    } else {
+      toast.error('Failed to start the lesson.');
     }
+  };
+
+  const handleJoin = (lesson: Lesson) => {
+    const link = resolveLink(lesson);
+    if (!link) {
+      toast.error('No Zoom link set. Add your personal Zoom link in your profile.');
+      return;
+    }
+    window.open(link, '_blank', 'noopener,noreferrer');
   };
 
   const getStatusVariant = (status: string) => {
@@ -186,11 +216,21 @@ export function TeacherDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {!zoomLink && (
+        <Card className="border-yellow-200 bg-yellow-50">
+          <CardContent className="py-3 text-sm text-yellow-800">
+            You have no personal Zoom link set yet. Ask management to add it so your
+            "Start Meeting" button and your students' "Enter" button work.
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <StatsCard title="Today's Lessons" value={stats.todayLessons} icon="calendar" />
         <StatsCard title="Total Students" value={stats.totalStudents} icon="users" />
         <StatsCard title="Completed" value={stats.completedLessons} icon="check" />
         <StatsCard title="Attendance Rate" value={`${stats.attendanceRate}%`} icon="attendance" />
+        <StatsCard title="Earnings" value={stats.earnings.toFixed(2)} icon="attendance" />
       </div>
 
       {pendingReports.length > 0 && (
@@ -251,13 +291,14 @@ export function TeacherDashboard() {
                   </div>
                   <div className="flex gap-2">
                     {lesson.status === 'scheduled' && (
-                      <Button onClick={() => handleStartLesson(lesson.id)}>
+                      <Button onClick={() => handleStartLesson(lesson)}>
                         <Play className="h-4 w-4 mr-2" />
                         Start Meeting
                       </Button>
                     )}
-                    {lesson.status === 'live' && lesson.meeting_url && (
-                      <Button variant="outline" onClick={() => window.open(lesson.meeting_url, '_blank', 'noopener,noreferrer')}>
+                    {lesson.status === 'live' && (
+                      <Button variant="outline" onClick={() => handleJoin(lesson)}>
+                        <Video className="h-4 w-4 mr-2" />
                         Join Meeting
                       </Button>
                     )}

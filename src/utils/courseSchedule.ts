@@ -86,6 +86,10 @@ export interface BuildLessonRowsParams {
   startDate: string;
   createdBy?: string | null;
   startNumber?: number;
+  /** Teacher's Zoom link, stamped onto every generated lesson's meeting_url. */
+  meetingUrl?: string | null;
+  /** Amount the teacher earns per lesson, stamped onto each lesson. */
+  teacherRate?: number | null;
 }
 
 /**
@@ -115,6 +119,8 @@ export function buildCourseLessonRows(params: BuildLessonRowsParams): Record<str
     end_time: d.end_time,
     duration_minutes: params.durationMinutes,
     meeting_platform: 'zoom',
+    meeting_url: params.meetingUrl ?? null,
+    teacher_rate: params.teacherRate ?? null,
     status: 'scheduled',
     is_recurring: false,
     created_by: params.createdBy ?? null,

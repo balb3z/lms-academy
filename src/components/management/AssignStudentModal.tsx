@@ -42,6 +42,9 @@ export function AssignStudentModal({ open, onClose, onSuccess, course, excludeSt
   const [studentId, setStudentId] = useState('');
   const [totalLessons, setTotalLessons] = useState(course.total_lessons);
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [teacherZoom, setTeacherZoom] = useState<string | null>(null);
+  const [studentPrice, setStudentPrice] = useState('');
+  const [teacherRate, setTeacherRate] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -49,11 +52,23 @@ export function AssignStudentModal({ open, onClose, onSuccess, course, excludeSt
       setStudentId('');
       setTotalLessons(course.total_lessons);
       setStartDate(new Date().toISOString().split('T')[0]);
+      setStudentPrice('');
+      setTeacherRate('');
       setError('');
       fetchStudents();
+      fetchTeacherZoom();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  const fetchTeacherZoom = async () => {
+    const { data } = await supabase
+      .from('teachers')
+      .select('zoom_link')
+      .eq('id', course.teacher_id)
+      .single();
+    setTeacherZoom(data?.zoom_link || null);
+  };
 
   const fetchStudents = async () => {
     setFetchingData(true);
@@ -100,6 +115,11 @@ export function AssignStudentModal({ open, onClose, onSuccess, course, excludeSt
     setLoading(true);
 
     try {
+      const teacherRateNum =
+        teacherRate && !isNaN(parseFloat(teacherRate)) ? parseFloat(teacherRate) : null;
+      const studentPriceNum =
+        studentPrice && !isNaN(parseFloat(studentPrice)) ? parseFloat(studentPrice) : null;
+
       // 1. Generate the student's lessons from the course schedule
       const lessonRows = buildCourseLessonRows({
         courseId: course.id,
@@ -112,6 +132,8 @@ export function AssignStudentModal({ open, onClose, onSuccess, course, excludeSt
         durationMinutes: course.lesson_duration_minutes,
         startDate,
         createdBy: user?.id,
+        meetingUrl: teacherZoom,
+        teacherRate: teacherRateNum,
       });
 
       if (lessonRows.length === 0) {
@@ -131,6 +153,8 @@ export function AssignStudentModal({ open, onClose, onSuccess, course, excludeSt
           student_id: studentId,
           start_date: startDate,
           lessons_generated: lessonRows.length,
+          student_price: studentPriceNum,
+          teacher_rate: teacherRateNum,
           is_active: true,
           enrolled_by: user?.id,
         },
@@ -231,6 +255,33 @@ export function AssignStudentModal({ open, onClose, onSuccess, course, excludeSt
                 type="date"
                 value={startDate}
                 onChange={e => setStartDate(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label htmlFor="assign_student_price">Student Price / lesson</Label>
+              <Input
+                id="assign_student_price"
+                type="number"
+                min={0}
+                step={0.01}
+                placeholder="0.00"
+                value={studentPrice}
+                onChange={e => setStudentPrice(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="assign_teacher_rate">Teacher Rate / lesson</Label>
+              <Input
+                id="assign_teacher_rate"
+                type="number"
+                min={0}
+                step={0.01}
+                placeholder="0.00"
+                value={teacherRate}
+                onChange={e => setTeacherRate(e.target.value)}
               />
             </div>
           </div>

@@ -41,6 +41,7 @@ export interface Teacher {
   specialization?: string;
   qualification?: string;
   years_of_experience?: number;
+  zoom_link?: string;
   is_active: boolean;
   profile?: Profile;
   user?: User;
@@ -88,6 +89,7 @@ export interface Lesson {
   subject_id?: string;
   course_id?: string;
   lesson_number?: number;
+  teacher_rate?: number;
   title: string;
   description?: string;
   scheduled_date: string;
