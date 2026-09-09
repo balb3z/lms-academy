@@ -7,8 +7,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { supabase } from '@/lib/supabase/client';
 import { Course, Lesson, Payment } from '@/types';
-import { ArrowLeft, DollarSign, BookOpen, CheckCircle, Clock, XCircle, AlertCircle } from 'lucide-react';
+import { ArrowLeft, DollarSign, BookOpen, CheckCircle, Clock, XCircle, AlertCircle, UserPlus, Users } from 'lucide-react';
 import { CoursePaymentModal } from '@/components/management/CoursePaymentModal';
+import { AssignStudentModal } from '@/components/management/AssignStudentModal';
 import { toast } from 'react-toastify';
 
 // ── helpers ────────────────────────────────────────────────────────────────────
@@ -51,6 +52,11 @@ const PAYMENT_STATUS_COLORS: Record<string, string> = {
   refunded: 'text-muted-foreground',
 };
 
+interface EnrolledStudent {
+  id: string;
+  full_name: string;
+}
+
 // ── component ──────────────────────────────────────────────────────────────────
 
 export function CourseDetails() {
@@ -60,10 +66,12 @@ export function CourseDetails() {
   const [course, setCourse] = useState<Course | null>(null);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [studentName, setStudentName] = useState('');
+  const [enrolledStudents, setEnrolledStudents] = useState<EnrolledStudent[]>([]);
+  const [studentNames, setStudentNames] = useState<Record<string, string>>({});
   const [teacherName, setTeacherName] = useState('');
   const [loading, setLoading] = useState(true);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showAssignModal, setShowAssignModal] = useState(false);
   const [updatingLesson, setUpdatingLesson] = useState<string | null>(null);
 
   useEffect(() => {
@@ -73,18 +81,24 @@ export function CourseDetails() {
   const fetchAll = async (courseId: string) => {
     setLoading(true);
     try {
-      const [courseRes, lessonsRes, paymentsRes] = await Promise.all([
+      const [courseRes, lessonsRes, paymentsRes, enrollRes] = await Promise.all([
         supabase.from('courses').select('*').eq('id', courseId).single(),
         supabase
           .from('lessons')
           .select('*')
           .eq('course_id', courseId)
-          .order('lesson_number', { ascending: true }),
+          .order('scheduled_date', { ascending: true })
+          .order('start_time', { ascending: true }),
         supabase
           .from('payments')
           .select('*')
           .eq('course_id', courseId)
           .order('payment_date', { ascending: false }),
+        supabase
+          .from('course_enrollments')
+          .select('student_id')
+          .eq('course_id', courseId)
+          .eq('is_active', true),
       ]);
 
       if (courseRes.error || !courseRes.data) {
@@ -98,13 +112,33 @@ export function CourseDetails() {
       setLessons((lessonsRes.data as Lesson[]) || []);
       setPayments((paymentsRes.data as Payment[]) || []);
 
-      // Fetch names
-      const [spRes, tpRes] = await Promise.all([
-        supabase.from('profiles').select('full_name').eq('id', c.student_id).single(),
+      // Enrolled students = the course's primary student + all active enrollments
+      const enrolledIds = Array.from(
+        new Set<string>([
+          c.student_id,
+          ...((enrollRes.data || []).map((e: any) => e.student_id as string)),
+        ]),
+      );
+
+      // Names for every student referenced by an enrollment OR a lesson
+      const lessonStudentIds = (lessonsRes.data || []).map((l: any) => l.student_id as string);
+      const allStudentIds = Array.from(new Set<string>([...enrolledIds, ...lessonStudentIds]));
+
+      const [profilesRes, teacherRes] = await Promise.all([
+        allStudentIds.length > 0
+          ? supabase.from('profiles').select('id, full_name').in('id', allStudentIds)
+          : Promise.resolve({ data: [] as any[] }),
         supabase.from('profiles').select('full_name').eq('id', c.teacher_id).single(),
       ]);
-      setStudentName(spRes.data?.full_name ?? '-');
-      setTeacherName(tpRes.data?.full_name ?? '-');
+
+      const nameMap: Record<string, string> = {};
+      (profilesRes.data || []).forEach((p: any) => { nameMap[p.id] = p.full_name; });
+
+      setStudentNames(nameMap);
+      setTeacherName(teacherRes.data?.full_name ?? '-');
+      setEnrolledStudents(
+        enrolledIds.map(sid => ({ id: sid, full_name: nameMap[sid] ?? '-' })),
+      );
     } catch (err) {
       console.error('Error loading course details:', err);
     } finally {
@@ -172,8 +206,9 @@ export function CourseDetails() {
   const scheduledLessons = lessons.filter(l => l.status === 'scheduled').length;
   const cancelledLessons = lessons.filter(l => l.status === 'cancelled').length;
   const absentLessons = lessons.filter(l => l.status === 'absent').length;
-  const progress = course.total_lessons > 0
-    ? Math.round((completedLessons / course.total_lessons) * 100)
+  const totalLessonCount = lessons.length || course.total_lessons;
+  const progress = totalLessonCount > 0
+    ? Math.round((completedLessons / totalLessonCount) * 100)
     : 0;
 
   const totalPaid = payments
@@ -208,7 +243,7 @@ export function CourseDetails() {
             </Badge>
           </div>
           <p className="text-muted-foreground mt-0.5">
-            {studentName} &bull; {teacherName} &bull; Started {formatDate(course.start_date)}
+            Teacher: {teacherName} &bull; {enrolledStudents.length} student{enrolledStudents.length === 1 ? '' : 's'} &bull; Started {formatDate(course.start_date)}
           </p>
         </div>
         <div className="flex gap-2 shrink-0">
@@ -243,7 +278,7 @@ export function CourseDetails() {
             <div className="h-1.5 mt-2 rounded-full bg-muted overflow-hidden">
               <div className="h-full bg-primary rounded-full" style={{ width: `${progress}%` }} />
             </div>
-            <p className="text-xs text-muted-foreground mt-1">{completedLessons}/{course.total_lessons} lessons</p>
+            <p className="text-xs text-muted-foreground mt-1">{completedLessons}/{totalLessonCount} lessons</p>
           </CardContent>
         </Card>
         <Card>
@@ -281,6 +316,37 @@ export function CourseDetails() {
         </Card>
       </div>
 
+      {/* Enrolled Students */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              Enrolled Students ({enrolledStudents.length})
+            </span>
+            <Button size="sm" onClick={() => setShowAssignModal(true)}>
+              <UserPlus className="h-4 w-4 mr-1" />
+              Assign Student
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-2">
+            {enrolledStudents.map(s => (
+              <span
+                key={s.id}
+                className="inline-flex items-center gap-2 rounded-full border bg-muted/40 px-3 py-1 text-sm"
+              >
+                <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center">
+                  {s.full_name?.[0]?.toUpperCase() || '?'}
+                </span>
+                {s.full_name}
+              </span>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Details + Pricing side by side */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card>
@@ -288,10 +354,6 @@ export function CourseDetails() {
             <CardTitle className="text-base">Course Details</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Student</span>
-              <span className="font-medium">{studentName}</span>
-            </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Teacher</span>
               <span className="font-medium">{teacherName}</span>
@@ -309,6 +371,10 @@ export function CourseDetails() {
             <div className="flex justify-between">
               <span className="text-muted-foreground">Frequency</span>
               <span className="font-medium">{course.lessons_per_week}x / week</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Lessons / Student</span>
+              <span className="font-medium">{course.total_lessons}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Start Date</span>
@@ -398,7 +464,7 @@ export function CourseDetails() {
                     <TableHead className="w-12">#</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead>Time</TableHead>
-                    <TableHead>Title</TableHead>
+                    <TableHead>Student</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -420,7 +486,9 @@ export function CourseDetails() {
                         <TableCell className="tabular-nums">
                           {formatTime(lesson.start_time)}
                         </TableCell>
-                        <TableCell className="max-w-[160px] truncate">{lesson.title}</TableCell>
+                        <TableCell className="max-w-[140px] truncate">
+                          {studentNames[lesson.student_id] ?? '-'}
+                        </TableCell>
                         <TableCell>
                           <Badge variant={STATUS_VARIANT[lesson.status] ?? 'default'}>
                             {capitalize(lesson.status)}
@@ -465,7 +533,7 @@ export function CourseDetails() {
                                 </Button>
                               </>
                             )}
-                            {lesson.status === 'completed' && (
+                            {lesson.status !== 'scheduled' && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -474,19 +542,6 @@ export function CourseDetails() {
                                 onClick={() => updateLessonStatus(lesson.id, 'scheduled')}
                                 aria-label="Revert to scheduled"
                                 title="Revert to scheduled"
-                              >
-                                <Clock className="h-4 w-4" />
-                              </Button>
-                            )}
-                            {(lesson.status === 'absent' || lesson.status === 'cancelled') && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 px-2 text-muted-foreground"
-                                disabled={updatingLesson === lesson.id}
-                                onClick={() => updateLessonStatus(lesson.id, 'scheduled')}
-                                aria-label="Reschedule"
-                                title="Reschedule"
                               >
                                 <Clock className="h-4 w-4" />
                               </Button>
@@ -563,6 +618,23 @@ export function CourseDetails() {
         studentId={course.student_id}
         currency={course.currency}
         courseName={course.name}
+      />
+
+      <AssignStudentModal
+        open={showAssignModal}
+        onClose={() => setShowAssignModal(false)}
+        onSuccess={() => fetchAll(id!)}
+        course={{
+          id: course.id,
+          name: course.name,
+          teacher_id: course.teacher_id,
+          total_lessons: course.total_lessons,
+          lesson_duration_minutes: course.lesson_duration_minutes,
+          preferred_days: course.preferred_days,
+          preferred_time: course.preferred_time,
+          start_date: course.start_date,
+        }}
+        excludeStudentIds={enrolledStudents.map(s => s.id)}
       />
     </div>
   );

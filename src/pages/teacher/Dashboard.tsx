@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Lesson } from '@/types';
 import { formatTime } from '@/utils/format';
-import { Play, FileText, Users, Calendar, Clock } from 'lucide-react';
+import { Play, FileText } from 'lucide-react';
 
 export function TeacherDashboard() {
   const { user } = useAuth();
@@ -19,7 +19,7 @@ export function TeacherDashboard() {
     totalStudents: 0,
     todayLessons: 0,
     completedLessons: 0,
-    attendanceRate: 0
+    attendanceRate: 0,
   });
   const [loading, setLoading] = useState(true);
 
@@ -29,53 +29,75 @@ export function TeacherDashboard() {
     }
   }, [user]);
 
+  // Attach student names + subjects using separate round-trips instead of the
+  // broken `profile:user_id(...)` embed that previously failed the whole query.
+  const attachRelations = async (rows: any[]): Promise<Lesson[]> => {
+    if (!rows || rows.length === 0) return [];
+
+    const studentIds = [...new Set(rows.map(r => r.student_id).filter(Boolean))];
+    const subjectIds = [...new Set(rows.map(r => r.subject_id).filter(Boolean))];
+
+    const [studentProfilesRes, subjectsRes] = await Promise.all([
+      studentIds.length > 0
+        ? supabase.from('profiles').select('id, full_name').in('id', studentIds)
+        : Promise.resolve({ data: [] as any[] }),
+      subjectIds.length > 0
+        ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+
+    return rows.map(r => {
+      const sp = (studentProfilesRes.data || []).find((p: any) => p.id === r.student_id);
+      const subj = (subjectsRes.data || []).find((s: any) => s.id === r.subject_id);
+      return {
+        ...r,
+        student: { id: r.student_id, profile: sp ? { id: sp.id, full_name: sp.full_name } : undefined },
+        subject: subj || undefined,
+      };
+    });
+  };
+
   const fetchTeacherData = async () => {
     const today = new Date().toISOString().split('T')[0];
     const teacherId = user?.id;
 
     try {
-      const { data: assignments } = await supabase
-        .from('student_teacher_assignments')
-        .select('student_id')
-        .eq('teacher_id', teacherId)
-        .eq('is_active', true);
-
-      const studentIds = assignments?.map(a => a.student_id) || [];
-
-      const { data: lessons } = await supabase
+      // Today's lessons — driven directly by teacher_id so ALL of the teacher's
+      // lessons appear (course-generated and manually scheduled alike).
+      const { data: todayRows, error: todayError } = await supabase
         .from('lessons')
-        .select(`
-          *,
-          student:student_id (
-            id,
-            profile:user_id (full_name)
-          ),
-          subject:subject_id (*)
-        `)
+        .select('*')
+        .eq('teacher_id', teacherId)
         .eq('scheduled_date', today)
-        .in('student_id', studentIds)
         .order('start_time');
 
-      setTodayLessons(lessons || []);
+      if (todayError) console.error('Error fetching today lessons:', todayError);
+      const todayEnriched = await attachRelations(todayRows || []);
+      setTodayLessons(todayEnriched);
 
-      const { data: pending } = await supabase
+      // Pending reports: completed lessons for this teacher that have no report.
+      const { data: completedRows } = await supabase
         .from('lessons')
-        .select(`
-          *,
-          student:student_id (
-            id,
-            profile:user_id (full_name)
-          ),
-          subject:subject_id (*)
-        `)
+        .select('*')
+        .eq('teacher_id', teacherId)
         .eq('status', 'completed')
-        .in('student_id', studentIds)
-        .not('id', 'in', (
-          supabase.from('lesson_reports').select('lesson_id')
-        ));
+        .order('scheduled_date', { ascending: false });
 
-      setPendingReports(pending || []);
+      let pending: Lesson[] = [];
+      if (completedRows && completedRows.length > 0) {
+        const completedIds = completedRows.map((l: any) => l.id);
+        const { data: existingReports } = await supabase
+          .from('lesson_reports')
+          .select('lesson_id')
+          .in('lesson_id', completedIds);
 
+        const reportedIds = new Set((existingReports || []).map((r: any) => r.lesson_id));
+        const withoutReports = completedRows.filter((l: any) => !reportedIds.has(l.id));
+        pending = await attachRelations(withoutReports.slice(0, 10));
+      }
+      setPendingReports(pending);
+
+      // Stats
       const { count: totalStudents } = await supabase
         .from('student_teacher_assignments')
         .select('*', { count: 'exact', head: true })
@@ -85,22 +107,22 @@ export function TeacherDashboard() {
       const { count: completedLessons } = await supabase
         .from('lessons')
         .select('*', { count: 'exact', head: true })
-        .eq('status', 'completed')
-        .in('student_id', studentIds);
+        .eq('teacher_id', teacherId)
+        .eq('status', 'completed');
 
       const { data: attendanceData } = await supabase
         .from('attendance')
         .select('status')
-        .in('student_id', studentIds);
+        .eq('teacher_id', teacherId);
 
       const presentCount = attendanceData?.filter(a => a.status === 'present').length || 0;
       const totalAttendance = attendanceData?.length || 0;
 
       setStats({
         totalStudents: totalStudents || 0,
-        todayLessons: lessons?.length || 0,
+        todayLessons: todayEnriched.length,
         completedLessons: completedLessons || 0,
-        attendanceRate: totalAttendance > 0 ? Math.round((presentCount / totalAttendance) * 100) : 0
+        attendanceRate: totalAttendance > 0 ? Math.round((presentCount / totalAttendance) * 100) : 0,
       });
     } catch (error) {
       console.error('Error fetching teacher data:', error);
@@ -114,14 +136,14 @@ export function TeacherDashboard() {
       .from('lessons')
       .update({
         status: 'live',
-        actual_start_time: new Date().toISOString()
+        actual_start_time: new Date().toISOString(),
       })
       .eq('id', lessonId);
 
     if (!error) {
       const lesson = todayLessons.find(l => l.id === lessonId);
       if (lesson?.meeting_url) {
-        window.open(lesson.meeting_url, '_blank');
+        window.open(lesson.meeting_url, '_blank', 'noopener,noreferrer');
       }
       fetchTeacherData();
     }
@@ -150,11 +172,11 @@ export function TeacherDashboard() {
         <div>
           <h1 className="text-3xl font-bold">{greeting}, Teacher!</h1>
           <p className="text-muted-foreground">
-            {new Date().toLocaleDateString('en-US', { 
-              weekday: 'long', 
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric' 
+            {new Date().toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
             })}
           </p>
         </div>
@@ -184,7 +206,7 @@ export function TeacherDashboard() {
               {pendingReports.map((lesson) => (
                 <div key={lesson.id} className="flex items-center justify-between p-3 bg-white rounded-lg border">
                   <div>
-                    <p className="font-medium">{lesson.student?.profile?.full_name}</p>
+                    <p className="font-medium">{lesson.student?.profile?.full_name || 'Student'}</p>
                     <p className="text-sm text-muted-foreground">
                       {lesson.title} • {lesson.scheduled_date} at {formatTime(lesson.start_time)}
                     </p>
@@ -220,7 +242,7 @@ export function TeacherDashboard() {
                     <div>
                       <p className="font-medium">{lesson.title}</p>
                       <p className="text-sm text-muted-foreground">
-                        {lesson.subject?.name} • {lesson.student?.profile?.full_name}
+                        {[lesson.subject?.name, lesson.student?.profile?.full_name].filter(Boolean).join(' • ')}
                       </p>
                     </div>
                     <Badge variant={getStatusVariant(lesson.status)}>
@@ -234,8 +256,8 @@ export function TeacherDashboard() {
                         Start Meeting
                       </Button>
                     )}
-                    {lesson.status === 'live' && (
-                      <Button variant="outline" onClick={() => window.open(lesson.meeting_url, '_blank')}>
+                    {lesson.status === 'live' && lesson.meeting_url && (
+                      <Button variant="outline" onClick={() => window.open(lesson.meeting_url, '_blank', 'noopener,noreferrer')}>
                         Join Meeting
                       </Button>
                     )}

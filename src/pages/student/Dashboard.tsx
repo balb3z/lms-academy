@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Lesson, LessonReport } from '@/types';
 import { formatTime } from '@/utils/format';
-import { Video, Calendar, FileText, Bell, Clock } from 'lucide-react';
+import { Video, FileText, Bell, Clock } from 'lucide-react';
 
 export function StudentDashboard() {
   const { user } = useAuth();
@@ -19,10 +19,10 @@ export function StudentDashboard() {
     present: 0,
     late: 0,
     absent: 0,
-    rate: 0
+    rate: 0,
   });
   const [recentReports, setRecentReports] = useState<LessonReport[]>([]);
-  const [notifications, setNotifications] = useState([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,40 +32,57 @@ export function StudentDashboard() {
     }
   }, [user]);
 
+  // Attach teacher names + subjects to lessons using separate round-trips.
+  // The old embedded `profile:user_id(...)` join does not exist in the schema
+  // (profiles.id == users.id) and made the whole query fail, so no lessons
+  // were ever shown. This resolves names without a broken embed.
+  const attachRelations = async (rows: any[]): Promise<Lesson[]> => {
+    if (!rows || rows.length === 0) return [];
+
+    const teacherIds = [...new Set(rows.map(r => r.teacher_id).filter(Boolean))];
+    const subjectIds = [...new Set(rows.map(r => r.subject_id).filter(Boolean))];
+
+    const [teacherProfilesRes, subjectsRes] = await Promise.all([
+      teacherIds.length > 0
+        ? supabase.from('profiles').select('id, full_name').in('id', teacherIds)
+        : Promise.resolve({ data: [] as any[] }),
+      subjectIds.length > 0
+        ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+
+    return rows.map(r => {
+      const tp = (teacherProfilesRes.data || []).find((p: any) => p.id === r.teacher_id);
+      const subj = (subjectsRes.data || []).find((s: any) => s.id === r.subject_id);
+      return {
+        ...r,
+        teacher: { id: r.teacher_id, profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined },
+        subject: subj || undefined,
+      };
+    });
+  };
+
   const fetchStudentData = async () => {
     const studentId = user?.id;
     const today = new Date().toISOString().split('T')[0];
 
     try {
-      const { data: lessons } = await supabase
+      const { data: todayRows, error: todayError } = await supabase
         .from('lessons')
-        .select(`
-          *,
-          teacher:teacher_id (
-            id,
-            profile:user_id (full_name)
-          ),
-          subject:subject_id (*)
-        `)
+        .select('*')
         .eq('student_id', studentId)
         .eq('scheduled_date', today)
         .order('start_time');
 
-      setTodayLessons(lessons || []);
+      if (todayError) console.error('Error fetching today lessons:', todayError);
+      setTodayLessons(await attachRelations(todayRows || []));
 
       const nextWeek = new Date();
       nextWeek.setDate(nextWeek.getDate() + 7);
-      
-      const { data: upcoming } = await supabase
+
+      const { data: upcomingRows } = await supabase
         .from('lessons')
-        .select(`
-          *,
-          teacher:teacher_id (
-            id,
-            profile:user_id (full_name)
-          ),
-          subject:subject_id (*)
-        `)
+        .select('*')
         .eq('student_id', studentId)
         .gt('scheduled_date', today)
         .lte('scheduled_date', nextWeek.toISOString().split('T')[0])
@@ -73,7 +90,7 @@ export function StudentDashboard() {
         .order('scheduled_date')
         .order('start_time');
 
-      setUpcomingLessons(upcoming || []);
+      setUpcomingLessons(await attachRelations(upcomingRows || []));
 
       const { data: attendance } = await supabase
         .from('attendance')
@@ -89,25 +106,30 @@ export function StudentDashboard() {
         present,
         late,
         absent,
-        rate: total > 0 ? Math.round((present / total) * 100) : 0
+        rate: total > 0 ? Math.round((present / total) * 100) : 0,
       });
 
-      const { data: reports } = await supabase
+      // Reports: lesson embed is valid; resolve teacher names separately
+      const { data: reportRows } = await supabase
         .from('lesson_reports')
-        .select(`
-          *,
-          lesson:lesson_id (*),
-          teacher:teacher_id (
-            id,
-            profile:user_id (full_name)
-          )
-        `)
+        .select('*, lesson:lesson_id (*)')
         .eq('student_id', studentId)
         .eq('is_visible_to_student', true)
         .order('submitted_at', { ascending: false })
         .limit(3);
 
-      setRecentReports(reports || []);
+      let reports: LessonReport[] = (reportRows as LessonReport[]) || [];
+      if (reports.length > 0) {
+        const tIds = [...new Set(reports.map((r: any) => r.teacher_id).filter(Boolean))];
+        const { data: tProfiles } = tIds.length > 0
+          ? await supabase.from('profiles').select('id, full_name').in('id', tIds)
+          : { data: [] as any[] };
+        reports = reports.map((r: any) => {
+          const tp = (tProfiles || []).find((p: any) => p.id === r.teacher_id);
+          return { ...r, teacher: { id: r.teacher_id, profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined } };
+        });
+      }
+      setRecentReports(reports);
     } catch (error) {
       console.error('Error fetching student data:', error);
     } finally {
@@ -129,7 +151,7 @@ export function StudentDashboard() {
 
   const handleJoinMeeting = (lesson: Lesson) => {
     if (lesson.meeting_url) {
-      window.open(lesson.meeting_url, '_blank');
+      window.open(lesson.meeting_url, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -143,10 +165,10 @@ export function StudentDashboard() {
         <div>
           <h1 className="text-3xl font-bold">Welcome back, Student!</h1>
           <p className="text-muted-foreground">
-            {new Date().toLocaleDateString('en-US', { 
-              weekday: 'long', 
-              month: 'long', 
-              day: 'numeric' 
+            {new Date().toLocaleDateString('en-US', {
+              weekday: 'long',
+              month: 'long',
+              day: 'numeric',
             })}
           </p>
         </div>
@@ -173,14 +195,14 @@ export function StudentDashboard() {
                 <div key={lesson.id} className="flex items-center justify-between p-4 border rounded-lg">
                   <div className="flex items-center gap-4">
                     <div className="w-16 h-16 bg-primary/10 rounded-lg flex items-center justify-center">
-                      <span className="text-2xl font-bold text-primary">
+                      <span className="text-lg font-bold text-primary text-center leading-tight">
                         {formatTime(lesson.start_time)}
                       </span>
                     </div>
                     <div>
                       <p className="font-semibold">{lesson.title}</p>
                       <p className="text-sm text-muted-foreground">
-                        {lesson.subject?.name} • {lesson.teacher?.profile?.full_name}
+                        {[lesson.subject?.name, lesson.teacher?.profile?.full_name].filter(Boolean).join(' • ')}
                       </p>
                       <p className="text-sm text-muted-foreground">
                         {formatTime(lesson.start_time)} - {formatTime(lesson.end_time)}
@@ -231,7 +253,7 @@ export function StudentDashboard() {
                       {lesson.scheduled_date} at {formatTime(lesson.start_time)}
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      {lesson.subject?.name} • {lesson.teacher?.profile?.full_name}
+                      {[lesson.subject?.name, lesson.teacher?.profile?.full_name].filter(Boolean).join(' • ')}
                     </p>
                   </div>
                   <Badge variant="info">Upcoming</Badge>

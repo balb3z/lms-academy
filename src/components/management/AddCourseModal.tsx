@@ -8,53 +8,7 @@ import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'react-toastify';
 import { CheckCircle, BookOpen } from 'lucide-react';
-
-// ── constants ──────────────────────────────────────────────────────────────────
-
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-
-// ── helpers ────────────────────────────────────────────────────────────────────
-
-function parseLocalDate(dateStr: string): Date {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(y, m - 1, d);
-}
-
-function addMinutesToTime(time: string, minutes: number): string {
-  const [h, m] = time.split(':').map(Number);
-  const total = h * 60 + m + minutes;
-  return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-}
-
-function generateLessonDates(
-  startDate: string,
-  totalLessons: number,
-  preferredDays: string[],
-  preferredTime: string,
-  durationMinutes: number,
-): Array<{ date: string; start_time: string; end_time: string }> {
-  const results: Array<{ date: string; start_time: string; end_time: string }> = [];
-  const dayNums = new Set(
-    preferredDays.map(d => DAY_KEYS.indexOf(d.toLowerCase())).filter(n => n >= 0),
-  );
-  const endTime = addMinutesToTime(preferredTime, durationMinutes);
-  const current = parseLocalDate(startDate);
-  let guard = 0;
-
-  while (results.length < totalLessons && guard < 1500) {
-    if (dayNums.has(current.getDay())) {
-      const y = current.getFullYear();
-      const mo = String(current.getMonth() + 1).padStart(2, '0');
-      const d = String(current.getDate()).padStart(2, '0');
-      results.push({ date: `${y}-${mo}-${d}`, start_time: preferredTime, end_time: endTime });
-    }
-    current.setDate(current.getDate() + 1);
-    guard++;
-  }
-
-  return results;
-}
+import { DAY_LABELS, DAY_KEYS, buildCourseLessonRows } from '@/utils/courseSchedule';
 
 // ── types ──────────────────────────────────────────────────────────────────────
 
@@ -245,43 +199,57 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
       if (courseError) throw courseError;
       const courseId = createdCourse.id;
 
-      // Generate and bulk-insert lessons
-      const dates = generateLessonDates(
-        formData.start_date,
-        formData.total_lessons,
-        formData.preferred_days,
-        formData.preferred_time,
-        formData.lesson_duration_minutes,
-      );
+      // Generate and bulk-insert lessons for the initial student
+      const lessonRows = buildCourseLessonRows({
+        courseId,
+        courseName: formData.name.trim(),
+        studentId: formData.student_id,
+        teacherId: formData.teacher_id,
+        totalLessons: formData.total_lessons,
+        preferredDays: formData.preferred_days,
+        preferredTime: formData.preferred_time,
+        durationMinutes: formData.lesson_duration_minutes,
+        startDate: formData.start_date,
+        createdBy: user?.id,
+      });
 
-      const lessonRows = dates.map((d, i) => ({
-        course_id: courseId,
-        lesson_number: i + 1,
-        student_id: formData.student_id,
-        teacher_id: formData.teacher_id,
-        title: `${formData.name.trim()} — Lesson ${i + 1}`,
-        scheduled_date: d.date,
-        start_time: d.start_time,
-        end_time: d.end_time,
-        duration_minutes: formData.lesson_duration_minutes,
-        meeting_platform: 'zoom',
-        status: 'scheduled',
-        is_recurring: false,
-        created_by: user?.id,
-      }));
-
-      // Insert in batches of 50 to stay within PostgREST limits
       for (let i = 0; i < lessonRows.length; i += 50) {
         const batch = lessonRows.slice(i, i + 50);
         const { error: lessonsError } = await supabase.from('lessons').insert(batch);
         if (lessonsError) throw new Error(`Lessons batch ${i}: ${lessonsError.message}`);
       }
 
-      setGeneratedCount(dates.length);
+      // Connect the flow: register the enrollment + the teacher↔student assignment
+      // so the student and teacher dashboards recognise the relationship.
+      const { error: enrollError } = await supabase.from('course_enrollments').upsert(
+        {
+          course_id: courseId,
+          student_id: formData.student_id,
+          start_date: formData.start_date,
+          lessons_generated: lessonRows.length,
+          is_active: true,
+          enrolled_by: user?.id,
+        },
+        { onConflict: 'course_id,student_id', ignoreDuplicates: true },
+      );
+      if (enrollError) console.error('Enrollment record failed (non-fatal):', enrollError);
+
+      const { error: assignError } = await supabase.from('student_teacher_assignments').upsert(
+        {
+          student_id: formData.student_id,
+          teacher_id: formData.teacher_id,
+          assigned_by: user?.id,
+          is_active: true,
+        },
+        { onConflict: 'student_id,teacher_id', ignoreDuplicates: true },
+      );
+      if (assignError) console.error('Assignment record failed (non-fatal):', assignError);
+
+      setGeneratedCount(lessonRows.length);
       setCreatedCourseName(formData.name.trim());
       setStep('success');
       onSuccess();
-      toast.success(`Course created with ${dates.length} lessons scheduled!`);
+      toast.success(`Course created with ${lessonRows.length} lessons scheduled!`);
     } catch (err: any) {
       console.error('Error creating course:', err);
       toast.error(err.message || 'Failed to create course.');
@@ -441,7 +409,7 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
                     Weekly Days <span className="text-destructive" aria-hidden>*</span>
                   </Label>
                   <div className="flex flex-wrap gap-2">
-                    {DAYS.map((day, i) => {
+                    {DAY_LABELS.map((day, i) => {
                       const key = DAY_KEYS[i];
                       const checked = formData.preferred_days.includes(key);
                       return (
@@ -569,8 +537,8 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
                 </div>
                 <p className="text-sm text-muted-foreground">
                   All lessons are now assigned to the student and teacher and visible on their
-                  dashboards and calendars. You can edit or reschedule individual lessons from the
-                  course detail page.
+                  dashboards and calendars. You can assign more students or reschedule individual
+                  lessons from the course detail page.
                 </p>
               </div>
             </div>
