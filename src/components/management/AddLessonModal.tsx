@@ -8,6 +8,25 @@ import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'react-toastify';
 
+interface Student {
+  id: string;
+  profile?: {
+    full_name: string;
+  };
+}
+
+interface Teacher {
+  id: string;
+  profile?: {
+    full_name: string;
+  };
+}
+
+interface Subject {
+  id: string;
+  name: string;
+}
+
 interface AddLessonModalProps {
   open: boolean;
   onClose: () => void;
@@ -16,9 +35,9 @@ interface AddLessonModalProps {
 
 export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps) {
   const { user } = useAuth();
-  const [students, setStudents] = useState([]);
-  const [teachers, setTeachers] = useState([]);
-  const [subjects, setSubjects] = useState([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     student_id: '',
@@ -47,9 +66,9 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
       supabase.from('subjects').select('*')
     ]);
 
-    setStudents(studentsRes.data || []);
-    setTeachers(teachersRes.data || []);
-    setSubjects(subjectsRes.data || []);
+    setStudents(studentsRes.data as Student[] || []);
+    setTeachers(teachersRes.data as Teacher[] || []);
+    setSubjects(subjectsRes.data as Subject[] || []);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -127,9 +146,9 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
                 required
               >
                 <option value="">Select student</option>
-                {students.map((student: any) => (
+                {students.map((student: Student) => (
                   <option key={student.id} value={student.id}>
-                    {student.profile?.full_name}
+                    {student.profile?.full_name || 'Unnamed Student'}
                   </option>
                 ))}
               </select>
@@ -144,9 +163,9 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
                 required
               >
                 <option value="">Select teacher</option>
-                {teachers.map((teacher: any) => (
+                {teachers.map((teacher: Teacher) => (
                   <option key={teacher.id} value={teacher.id}>
-                    {teacher.profile?.full_name}
+                    {teacher.profile?.full_name || 'Unnamed Teacher'}
                   </option>
                 ))}
               </select>
@@ -161,7 +180,7 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
                 required
               >
                 <option value="">Select subject</option>
-                {subjects.map((subject: any) => (
+                {subjects.map((subject: Subject) => (
                   <option key={subject.id} value={subject.id}>
                     {subject.name}
                   </option>
