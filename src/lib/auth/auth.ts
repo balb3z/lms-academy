@@ -21,11 +21,16 @@ export const auth = {
       .from('users')
       .select('role')
       .eq('id', data.user.id)
-      .single();
+      .maybeSingle();
       
     if (userError) {
       console.error('❌ Error fetching user role:', userError);
       throw userError;
+    }
+    
+    if (!userData) {
+      console.error('❌ No user row found in public.users for:', data.user.id);
+      throw new Error('User account not properly configured. Please contact management.');
     }
     
     console.log('✅ User role fetched:', userData.role);

@@ -25,7 +25,7 @@ export function useAuth() {
             .from('users')
             .select('*')
             .eq('id', sessionData.session.user.id)
-            .single();
+            .maybeSingle();
           if (userData) {
             setUser(userData);
             setRole(userData.role);
@@ -44,14 +44,16 @@ export function useAuth() {
                 .from('users')
                 .select('*')
                 .eq('id', session.user.id)
-                .single();
+                .maybeSingle();
               
               if (error) {
                 console.error('❌ Error fetching user data:', error);
-              } else {
+              } else if (userData) {
                 console.log('✅ User data loaded:', userData);
                 setUser(userData);
                 setRole(userData?.role);
+              } else {
+                console.warn('⚠️ No user row found in public.users for:', session.user.id);
               }
             } catch (error) {
               console.error('❌ Error in auth state change:', error);
