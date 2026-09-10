@@ -57,9 +57,9 @@ export function LessonDetails() {
       ]);
 
       const nameById: Record<string, string> = {};
-      (profilesRes.data || []).forEach((p: any) => { nameById[p.id] = p.full_name; });
+      (profilesRes.data || []).forEach((p: { id: string; full_name: string }) => { nameById[p.id] = p.full_name; });
       const emailById: Record<string, string> = {};
-      (usersRes.data || []).forEach((u: any) => { emailById[u.id] = u.email; });
+      (usersRes.data || []).forEach((u: { id: string; email: string }) => { emailById[u.id] = u.email; });
 
       setLesson(prev => (prev ? { ...prev, subject: subjectRes.data || undefined } : prev));
       setStudentName(nameById[data.student_id] || '-');

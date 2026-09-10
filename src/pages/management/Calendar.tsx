@@ -9,7 +9,6 @@ import { AddLessonModal } from '@/components/management/AddLessonModal';
 export function Calendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [lessons, setLessons] = useState<Lesson[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showAddLesson, setShowAddLesson] = useState(false);
 
   useEffect(() => {

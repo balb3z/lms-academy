@@ -16,7 +16,9 @@ const RATING_LABEL: Record<string, string> = {
   needs_improvement: 'Needs Improvement',
 };
 
-const RATING_VARIANT: Record<string, any> = {
+type BadgeVariant = 'success' | 'info' | 'warning' | 'destructive' | 'secondary' | 'default';
+
+const RATING_VARIANT: Record<string, BadgeVariant> = {
   excellent: 'success',
   very_good: 'success',
   good: 'info',

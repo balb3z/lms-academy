@@ -18,10 +18,12 @@ import {
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
+import { LucideIcon } from 'lucide-react';
+
 interface NavItem {
   label: string;
   href: string;
-  icon: any;
+  icon: LucideIcon;
   roles: string[];
 }
 

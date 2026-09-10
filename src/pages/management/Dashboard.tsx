@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/Badge';
 import { supabase } from '@/lib/supabase/client';
 import { formatTime } from '@/utils/format';
 import { Lesson } from '@/types';
-import { Calendar, Plus, Users, UserCog, BookOpen, GraduationCap } from 'lucide-react';
+import { Plus, Users, UserCog, BookOpen, GraduationCap } from 'lucide-react';
 import { AddLessonModal } from '@/components/management/AddLessonModal';
 import { AddStudentModal } from '@/components/management/AddStudentModal';
 import { AddTeacherModal } from '@/components/management/AddTeacherModal';
@@ -68,17 +68,17 @@ export function ManagementDashboard() {
       let enrichedLessons: Lesson[] = [];
 
       if (lessonRows && lessonRows.length > 0) {
-        const studentIds = [...new Set(lessonRows.map((l: any) => l.student_id as string))];
-        const teacherIds = [...new Set(lessonRows.map((l: any) => l.teacher_id as string))];
+        const studentIds = [...new Set(lessonRows.map((l: { student_id: string }) => l.student_id))];
+        const teacherIds = [...new Set(lessonRows.map((l: { teacher_id: string }) => l.teacher_id))];
 
         const [spRes, tpRes] = await Promise.all([
           supabase.from('profiles').select('id, full_name').in('id', studentIds),
           supabase.from('profiles').select('id, full_name').in('id', teacherIds),
         ]);
 
-        enrichedLessons = lessonRows.map((l: any) => {
-          const sp = (spRes.data || []).find((p: any) => p.id === l.student_id);
-          const tp = (tpRes.data || []).find((p: any) => p.id === l.teacher_id);
+        enrichedLessons = lessonRows.map((l: { student_id: string; teacher_id: string }) => {
+          const sp = (spRes.data || []).find((p) => p.id === l.student_id);
+          const tp = (tpRes.data || []).find((p) => p.id === l.teacher_id);
           return {
             ...l,
             student: { id: l.student_id, profile: sp ? { id: sp.id, full_name: sp.full_name } : undefined },

@@ -48,7 +48,7 @@ export function TeacherDashboard() {
 
   // Attach student names + subjects using separate round-trips instead of the
   // broken `profile:user_id(...)` embed that previously failed the whole query.
-  const attachRelations = async (rows: any[]): Promise<Lesson[]> => {
+  const attachRelations = async (rows: { student_id: string; subject_id?: string }[]): Promise<Lesson[]> => {
     if (!rows || rows.length === 0) return [];
 
     const studentIds = [...new Set(rows.map(r => r.student_id).filter(Boolean))];
@@ -57,15 +57,15 @@ export function TeacherDashboard() {
     const [studentProfilesRes, subjectsRes] = await Promise.all([
       studentIds.length > 0
         ? supabase.from('profiles').select('id, full_name').in('id', studentIds)
-        : Promise.resolve({ data: [] as any[] }),
+        : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
       subjectIds.length > 0
         ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
-        : Promise.resolve({ data: [] as any[] }),
+        : Promise.resolve({ data: [] as { id: string; name: string; color: string }[] }),
     ]);
 
     return rows.map(r => {
-      const sp = (studentProfilesRes.data || []).find((p: any) => p.id === r.student_id);
-      const subj = (subjectsRes.data || []).find((s: any) => s.id === r.subject_id);
+      const sp = (studentProfilesRes.data || []).find((p: { id: string; full_name: string }) => p.id === r.student_id);
+      const subj = (subjectsRes.data || []).find((s: { id: string; name: string; color: string }) => s.id === r.subject_id);
       return {
         ...r,
         student: { id: r.student_id, profile: sp ? { id: sp.id, full_name: sp.full_name } : undefined },
@@ -110,14 +110,14 @@ export function TeacherDashboard() {
 
       let pending: Lesson[] = [];
       if (completedRows && completedRows.length > 0) {
-        const completedIds = completedRows.map((l: any) => l.id);
+        const completedIds = completedRows.map((l: { id: string }) => l.id);
         const { data: existingReports } = await supabase
           .from('lesson_reports')
           .select('lesson_id')
           .in('lesson_id', completedIds);
 
-        const reportedIds = new Set((existingReports || []).map((r: any) => r.lesson_id));
-        const withoutReports = completedRows.filter((l: any) => !reportedIds.has(l.id));
+        const reportedIds = new Set((existingReports || []).map((r: { lesson_id: string }) => r.lesson_id));
+        const withoutReports = completedRows.filter((l: { id: string; teacher_rate: number | null; course_id?: string; student_id: string }) => !reportedIds.has(l.id));
         pending = await attachRelations(withoutReports.slice(0, 10));
       }
       setPendingReports(pending);
@@ -126,21 +126,21 @@ export function TeacherDashboard() {
       // Fallback: for completed lessons that have no stamped teacher_rate yet,
       // use the rate from their course enrollment so earnings stay consistent.
       const completed = completedRows || [];
-      const missingRate = completed.filter((l: any) => l.teacher_rate == null && l.course_id);
+      const missingRate = completed.filter((l: { teacher_rate: number | null; course_id?: string }) => l.teacher_rate == null && l.course_id);
       const enrollmentRateMap: Record<string, number> = {};
       if (missingRate.length > 0) {
-        const courseIds = [...new Set(missingRate.map((l: any) => l.course_id))];
+        const courseIds = [...new Set(missingRate.map((l: { course_id?: string }) => l.course_id).filter(Boolean))];
         const { data: enrollments } = await supabase
           .from('course_enrollments')
           .select('course_id, student_id, teacher_rate')
           .in('course_id', courseIds);
-        (enrollments || []).forEach((e: any) => {
+        (enrollments || []).forEach((e: { course_id: string; student_id: string; teacher_rate: number | null }) => {
           if (e.teacher_rate != null) {
             enrollmentRateMap[`${e.course_id}|${e.student_id}`] = Number(e.teacher_rate);
           }
         });
       }
-      const earnings = completed.reduce((sum: number, l: any) => {
+      const earnings = completed.reduce((sum: number, l: { teacher_rate: number | null; course_id?: string; student_id: string }) => {
         const rate = l.teacher_rate != null
           ? Number(l.teacher_rate)
           : (enrollmentRateMap[`${l.course_id}|${l.student_id}`] ?? 0);

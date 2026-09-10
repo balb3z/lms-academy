@@ -19,7 +19,9 @@ interface StatsCardProps {
   className?: string;
 }
 
-const iconMap: Record<string, any> = {
+import { LucideIcon } from 'lucide-react';
+
+const iconMap: Record<string, LucideIcon> = {
   users: Users,
   teachers: UserCog,
   calendar: Calendar,

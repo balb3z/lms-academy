@@ -23,7 +23,7 @@ export function StudentDashboard() {
   });
   const [progress, setProgress] = useState({ completed: 0, remaining: 0 });
   const [recentReports, setRecentReports] = useState<LessonReport[]>([]);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<{ id: string; title: string; message: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -37,7 +37,7 @@ export function StudentDashboard() {
   // The old embedded `profile:user_id(...)` join does not exist in the schema
   // (profiles.id == users.id) and made the whole query fail, so no lessons
   // were ever shown. This resolves names without a broken embed.
-  const attachRelations = async (rows: any[]): Promise<Lesson[]> => {
+  const attachRelations = async (rows: { teacher_id: string; subject_id?: string }[]): Promise<Lesson[]> => {
     if (!rows || rows.length === 0) return [];
 
     const teacherIds = [...new Set(rows.map(r => r.teacher_id).filter(Boolean))];
@@ -46,19 +46,19 @@ export function StudentDashboard() {
     const [teacherProfilesRes, teacherZoomRes, subjectsRes] = await Promise.all([
       teacherIds.length > 0
         ? supabase.from('profiles').select('id, full_name').in('id', teacherIds)
-        : Promise.resolve({ data: [] as any[] }),
+        : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
       teacherIds.length > 0
         ? supabase.from('teachers').select('id, zoom_link').in('id', teacherIds)
-        : Promise.resolve({ data: [] as any[] }),
+        : Promise.resolve({ data: [] as { id: string; zoom_link: string }[] }),
       subjectIds.length > 0
         ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
-        : Promise.resolve({ data: [] as any[] }),
+        : Promise.resolve({ data: [] as { id: string; name: string; color: string }[] }),
     ]);
 
     return rows.map(r => {
-      const tp = (teacherProfilesRes.data || []).find((p: any) => p.id === r.teacher_id);
-      const tz = (teacherZoomRes.data || []).find((t: any) => t.id === r.teacher_id);
-      const subj = (subjectsRes.data || []).find((s: any) => s.id === r.subject_id);
+      const tp = (teacherProfilesRes.data || []).find((p: { id: string; full_name: string }) => p.id === r.teacher_id);
+      const tz = (teacherZoomRes.data || []).find((t: { id: string; zoom_link: string }) => t.id === r.teacher_id);
+      const subj = (subjectsRes.data || []).find((s: { id: string; name: string; color: string }) => s.id === r.subject_id);
       return {
         ...r,
         teacher: {
@@ -138,12 +138,12 @@ export function StudentDashboard() {
 
       let reports: LessonReport[] = (reportRows as LessonReport[]) || [];
       if (reports.length > 0) {
-        const tIds = [...new Set(reports.map((r: any) => r.teacher_id).filter(Boolean))];
+        const tIds = [...new Set(reports.map((r: LessonReport) => r.teacher_id).filter(Boolean))];
         const { data: tProfiles } = tIds.length > 0
           ? await supabase.from('profiles').select('id, full_name').in('id', tIds)
-          : { data: [] as any[] };
-        reports = reports.map((r: any) => {
-          const tp = (tProfiles || []).find((p: any) => p.id === r.teacher_id);
+          : { data: [] as { id: string; full_name: string }[] };
+        reports = reports.map((r: LessonReport) => {
+          const tp = (tProfiles || []).find((p: { id: string; full_name: string }) => p.id === r.teacher_id);
           return { ...r, teacher: { id: r.teacher_id, profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined } };
         });
       }
