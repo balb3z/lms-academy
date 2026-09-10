@@ -8,8 +8,8 @@ import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Lesson, LessonReport } from '@/types';
 import { formatTime } from '@/utils/format';
-import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
-import { Video, FileText, Bell, Clock } from 'lucide-react';
+import { formatTimeInTimezone, formatDateInTimezone, getCurrentDateInTimezone } from '@/utils/timezone';
+import { Video, Calendar, FileText, Bell, Clock } from 'lucide-react';
 
 export function StudentDashboard() {
   const { user } = useAuth();
@@ -20,11 +20,10 @@ export function StudentDashboard() {
     present: 0,
     late: 0,
     absent: 0,
-    rate: 0,
+    rate: 0
   });
-  const [progress, setProgress] = useState({ completed: 0, remaining: 0 });
   const [recentReports, setRecentReports] = useState<LessonReport[]>([]);
-  const [notifications, setNotifications] = useState<{ id: string; title: string; message: string }[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -34,11 +33,8 @@ export function StudentDashboard() {
     }
   }, [user]);
 
-  // Attach teacher names + subjects + course timezone to lessons using separate round-trips.
-  // The old embedded `profile:user_id(...)` join does not exist in the schema
-  // (profiles.id == users.id) and made the whole query fail, so no lessons
-  // were ever shown. This resolves names without a broken embed.
-  const attachRelations = async (rows: { teacher_id: string; subject_id?: string; course_id?: string }[]): Promise<Lesson[]> => {
+  // Helper to attach teacher names + subjects + course timezone to lessons
+  const attachRelations = async (rows: { teacher_id: string; subject_id?: string; course_id?: string; start_time_utc?: string }[]): Promise<Lesson[]> => {
     if (!rows || rows.length === 0) return [];
 
     const teacherIds = [...new Set(rows.map(r => r.teacher_id).filter(Boolean))];
@@ -61,7 +57,7 @@ export function StudentDashboard() {
     ]);
 
     const courseTimezoneMap: Record<string, string> = {};
-    (coursesRes.data || []).forEach((c: { id: string; timezone: string }) => {
+    (coursesRes.data || []).forEach((c: any) => {
       courseTimezoneMap[c.id] = c.timezone || 'UTC';
     });
 
@@ -71,7 +67,7 @@ export function StudentDashboard() {
       const subj = (subjectsRes.data || []).find((s: { id: string; name: string; color: string }) => s.id === r.subject_id);
       const courseTz = r.course_id ? courseTimezoneMap[r.course_id] || 'UTC' : 'UTC';
       
-      // Convert lesson times to course timezone if UTC times are available
+      // Convert lesson times to course timezone for display
       let displayStartTime = r.start_time;
       let displayEndTime = r.end_time;
       let displayDate = r.scheduled_date;
@@ -99,34 +95,103 @@ export function StudentDashboard() {
 
   const fetchStudentData = async () => {
     const studentId = user?.id;
-    const today = new Date().toISOString().split('T')[0];
+    setLoading(true);
 
     try {
-      const { data: todayRows, error: todayError } = await supabase
-        .from('lessons')
-        .select('*')
+      // 1. Get student's courses with timezones
+      const { data: enrollments } = await supabase
+        .from('course_enrollments')
+        .select('course_id, course:course_id(timezone)')
         .eq('student_id', studentId)
-        .eq('scheduled_date', today)
-        .order('start_time');
+        .eq('is_active', true);
 
-      if (todayError) console.error('Error fetching today lessons:', todayError);
-      setTodayLessons(await attachRelations(todayRows || []));
+      const courseTimezoneMap: Record<string, string> = {};
+      (enrollments || []).forEach((e: any) => {
+        if (e.course?.timezone) {
+          courseTimezoneMap[e.course_id] = e.course.timezone;
+        }
+      });
 
-      const nextWeek = new Date();
-      nextWeek.setDate(nextWeek.getDate() + 7);
+      const courseIds = Object.keys(courseTimezoneMap);
+      
+      // 2. For each course, determine "today" in that course's timezone
+      const courseTodayMap: Record<string, string> = {};
+      courseIds.forEach(courseId => {
+        const tz = courseTimezoneMap[courseId] || 'UTC';
+        courseTodayMap[courseId] = getCurrentDateInTimezone(tz);
+      });
 
-      const { data: upcomingRows } = await supabase
-        .from('lessons')
-        .select('*')
-        .eq('student_id', studentId)
-        .gt('scheduled_date', today)
-        .lte('scheduled_date', nextWeek.toISOString().split('T')[0])
-        .neq('status', 'completed')
-        .order('scheduled_date')
-        .order('start_time');
+      // 3. Fetch today's lessons across all courses
+      const todayLessonsPromises = courseIds.map(courseId => {
+        const today = courseTodayMap[courseId];
+        return supabase
+          .from('lessons')
+          .select('*')
+          .eq('student_id', studentId)
+          .eq('course_id', courseId)
+          .eq('scheduled_date', today)
+          .order('start_time');
+      });
 
-      setUpcomingLessons(await attachRelations(upcomingRows || []));
+      const todayResults = await Promise.all(todayLessonsPromises);
+      const todayRows = todayResults.flatMap(r => r.data || []);
 
+      // 4. Fetch upcoming lessons (next 7 days across all courses)
+      const nextWeekMap: Record<string, string> = {};
+      courseIds.forEach(courseId => {
+        const tz = courseTimezoneMap[courseId] || 'UTC';
+        const nextWeek = new Date();
+        // Get current date in that timezone, add 7 days
+        const nowInTz = new Date();
+        const formatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: tz,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        });
+        const parts = formatter.formatToParts(nowInTz);
+        const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+        const year = parseInt(get('year'));
+        const month = parseInt(get('month')) - 1;
+        const day = parseInt(get('day'));
+        const nextWeekDate = new Date(Date.UTC(year, month, day + 7));
+        const nextWeekFormatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: tz,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        });
+        const nextWeekParts = nextWeekFormatter.formatToParts(nextWeekDate);
+        const getNext = (type: string) => nextWeekParts.find(p => p.type === type)?.value || '';
+        courseTodayMap[courseId] = `${getNext('year')}-${getNext('month')}-${getNext('day')}`;
+        nextWeekMap[courseId] = `${getNext('year')}-${getNext('month')}-${getNext('day')}`;
+      });
+
+      const upcomingPromises = courseIds.map(courseId => {
+        const today = courseTodayMap[courseId];
+        const nextWeek = nextWeekMap[courseId];
+        return supabase
+          .from('lessons')
+          .select('*')
+          .eq('student_id', studentId)
+          .eq('course_id', courseId)
+          .gt('scheduled_date', today)
+          .lte('scheduled_date', nextWeek)
+          .neq('status', 'completed')
+          .order('scheduled_date')
+          .order('start_time');
+      });
+
+      const upcomingResults = await Promise.all(upcomingPromises);
+      const upcomingRows = upcomingResults.flatMap(r => r.data || []);
+
+      // 5. Enrich today's lessons
+      setTodayLessons(await attachRelations(todayRows));
+      
+      // 6. Enrich upcoming lessons
+      setUpcomingLessons(await attachRelations(upcomingRows));
+
+      // 7. Attendance stats
       const { data: attendance } = await supabase
         .from('attendance')
         .select('status')
@@ -141,20 +206,11 @@ export function StudentDashboard() {
         present,
         late,
         absent,
-        rate: total > 0 ? Math.round((present / total) * 100) : 0,
+        rate: total > 0 ? Math.round((present / total) * 100) : 0
       });
 
-      // Remaining lessons = scheduled (not yet completed/cancelled); completed count for progress
-      const [{ count: completedCount }, { count: remainingCount }] = await Promise.all([
-        supabase.from('lessons').select('*', { count: 'exact', head: true })
-          .eq('student_id', studentId).eq('status', 'completed'),
-        supabase.from('lessons').select('*', { count: 'exact', head: true })
-          .eq('student_id', studentId).eq('status', 'scheduled'),
-      ]);
-      setProgress({ completed: completedCount || 0, remaining: remainingCount || 0 });
-
-      // Reports: lesson embed is valid; resolve teacher names separately
-      const { data: reportRows } = await supabase
+      // 8. Recent reports
+      const { data: reports } = await supabase
         .from('lesson_reports')
         .select('*, lesson:lesson_id (*)')
         .eq('student_id', studentId)
@@ -162,18 +218,18 @@ export function StudentDashboard() {
         .order('submitted_at', { ascending: false })
         .limit(3);
 
-      let reports: LessonReport[] = (reportRows as LessonReport[]) || [];
-      if (reports.length > 0) {
-        const tIds = [...new Set(reports.map((r: LessonReport) => r.teacher_id).filter(Boolean))];
+      let reportsEnriched: LessonReport[] = (reports as LessonReport[]) || [];
+      if (reportsEnriched.length > 0) {
+        const tIds = [...new Set(reportsEnriched.map((r: any) => r.teacher_id).filter(Boolean))];
         const { data: tProfiles } = tIds.length > 0
           ? await supabase.from('profiles').select('id, full_name').in('id', tIds)
-          : { data: [] as { id: string; full_name: string }[] };
-        reports = reports.map((r: LessonReport) => {
-          const tp = (tProfiles || []).find((p: { id: string; full_name: string }) => p.id === r.teacher_id);
+          : { data: [] as any[] };
+        reportsEnriched = reportsEnriched.map((r: any) => {
+          const tp = (tProfiles || []).find((p: any) => p.id === r.teacher_id);
           return { ...r, teacher: { id: r.teacher_id, profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined } };
         });
       }
-      setRecentReports(reports);
+      setRecentReports(reportsEnriched);
     } catch (error) {
       console.error('Error fetching student data:', error);
     } finally {
@@ -193,7 +249,7 @@ export function StudentDashboard() {
     setNotifications(data || []);
   };
 
-  const handleEnter = (lesson: Lesson) => {
+  const handleJoinMeeting = (lesson: Lesson) => {
     const link = lesson.teacher?.zoom_link || lesson.meeting_url;
     if (link) {
       window.open(link, '_blank', 'noopener,noreferrer');
@@ -210,10 +266,10 @@ export function StudentDashboard() {
         <div>
           <h1 className="text-3xl font-bold">Welcome back, Student!</h1>
           <p className="text-muted-foreground">
-            {new Date().toLocaleDateString('en-US', {
-              weekday: 'long',
-              month: 'long',
-              day: 'numeric',
+            {new Date().toLocaleDateString('en-US', { 
+              weekday: 'long', 
+              month: 'long', 
+              day: 'numeric' 
             })}
           </p>
         </div>
@@ -240,17 +296,17 @@ export function StudentDashboard() {
                 <div key={lesson.id} className="flex items-center justify-between p-4 border rounded-lg">
                   <div className="flex items-center gap-4">
                     <div className="w-16 h-16 bg-primary/10 rounded-lg flex items-center justify-center">
-                      <span className="text-lg font-bold text-primary text-center leading-tight">
-                        {formatTime(lesson.start_time)}
+                      <span className="text-2xl font-bold text-primary text-center leading-tight">
+                        {lesson.start_time}
                       </span>
                     </div>
                     <div>
                       <p className="font-semibold">{lesson.title}</p>
                       <p className="text-sm text-muted-foreground">
-                        {[lesson.subject?.name, lesson.teacher?.profile?.full_name].filter(Boolean).join(' • ')}
+                        {lesson.subject?.name} • {lesson.teacher?.profile?.full_name}
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        {formatTime(lesson.start_time)} - {formatTime(lesson.end_time)}
+                        {lesson.start_time} - {lesson.end_time}
                       </p>
                       <Badge variant={lesson.status === 'live' ? 'warning' : 'info'}>
                         {lesson.status}
@@ -260,7 +316,7 @@ export function StudentDashboard() {
                   {(() => {
                     const link = lesson.teacher?.zoom_link || lesson.meeting_url;
                     return link ? (
-                      <Button onClick={() => handleEnter(lesson)}>
+                      <Button onClick={() => handleJoinMeeting(lesson)}>
                         <Video className="h-4 w-4 mr-2" />
                         Enter
                       </Button>
@@ -278,10 +334,8 @@ export function StudentDashboard() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatsCard title="Attendance Rate" value={`${attendanceStats.rate}%`} icon="attendance" />
-        <StatsCard title="Completed" value={progress.completed} icon="check" />
-        <StatsCard title="Lessons Left" value={progress.remaining} icon="lessons" />
         <StatsCard title="Present" value={attendanceStats.present} icon="check" />
         <StatsCard title="Late" value={attendanceStats.late} icon="clock" />
         <StatsCard title="Absent" value={attendanceStats.absent} icon="users" />
@@ -299,10 +353,10 @@ export function StudentDashboard() {
                   <div>
                     <p className="font-medium">{lesson.title}</p>
                     <p className="text-sm text-muted-foreground">
-                      {lesson.scheduled_date} at {formatTime(lesson.start_time)}
+                      {lesson.scheduled_date} at {lesson.start_time}
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      {[lesson.subject?.name, lesson.teacher?.profile?.full_name].filter(Boolean).join(' • ')}
+                      {lesson.subject?.name} • {lesson.teacher?.profile?.full_name}
                     </p>
                   </div>
                   <Badge variant="info">Upcoming</Badge>

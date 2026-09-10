@@ -10,7 +10,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { Lesson } from '@/types';
 import { Search, Eye } from 'lucide-react';
 import { formatDate, formatTime } from '@/utils/format';
-import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
+import { formatTimeInTimezone, formatDateInTimezone, getCurrentDateInTimezone } from '@/utils/timezone';
 
 export function StudentLessons() {
   const { user } = useAuth();
@@ -74,7 +74,7 @@ export function StudentLessons() {
         const subj = (subjectsRes.data || []).find((s: any) => s.id === l.subject_id);
         const courseTz = l.course_id ? courseTimezoneMap[l.course_id] || 'UTC' : 'UTC';
         
-        // Convert times to course timezone
+        // Convert times to course timezone for display
         let displayStartTime = l.start_time;
         let displayEndTime = l.end_time;
         let displayDate = l.scheduled_date;
@@ -197,4 +197,15 @@ export function StudentLessons() {
       </Card>
     </div>
   );
+}
+
+function getStatusVariant(status: string) {
+  switch (status) {
+    case 'scheduled': return 'info';
+    case 'live': return 'warning';
+    case 'completed': return 'success';
+    case 'cancelled': return 'destructive';
+    case 'absent': return 'secondary';
+    default: return 'default';
+  }
 }

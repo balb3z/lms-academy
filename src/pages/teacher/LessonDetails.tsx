@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { supabase } from '@/lib/supabase/client';
 import { Lesson, LessonReport } from '@/types';
 import { formatDate, formatTime } from '@/utils/format';
+import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
 import { ArrowLeft, Calendar, Clock, Video, BookOpen, ClipboardList, Award } from 'lucide-react';
 import { toast } from 'react-toastify';
 
@@ -33,6 +34,8 @@ export function TeacherLessonDetails() {
   const [studentName, setStudentName] = useState('');
   const [studentEmail, setStudentEmail] = useState('');
   const [zoomLink, setZoomLink] = useState<string | null>(null);
+  const [teacherTimezone, setTeacherTimezone] = useState<string>('UTC');
+  const [courseTimezone, setCourseTimezone] = useState<string>('UTC');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -51,25 +54,30 @@ export function TeacherLessonDetails() {
       }
       setLesson(data);
 
-      const [subjectRes, studentProfileRes, studentUserRes, teacherRes, reportRes] = await Promise.all([
+      const [subjectRes, studentProfileRes, studentUserRes, teacherRes, reportRes, courseRes] = await Promise.all([
         data.subject_id
           ? supabase.from('subjects').select('id, name, color').eq('id', data.subject_id).single()
           : Promise.resolve({ data: null }),
         supabase.from('profiles').select('full_name').eq('id', data.student_id).single(),
         supabase.from('users').select('email').eq('id', data.student_id).single(),
-        supabase.from('teachers').select('zoom_link').eq('id', data.teacher_id).single(),
+        supabase.from('teachers').select('zoom_link, timezone').eq('id', data.teacher_id).single(),
         supabase
           .from('lesson_reports')
           .select('*')
           .eq('lesson_id', id)
           .order('submitted_at', { ascending: false })
           .limit(1),
+        data.course_id
+          ? supabase.from('courses').select('timezone').eq('id', data.course_id).single()
+          : Promise.resolve({ data: null }),
       ]);
 
       setLesson(prev => (prev ? { ...prev, subject: subjectRes.data || undefined } : prev));
       setStudentName(studentProfileRes.data?.full_name || 'Student');
       setStudentEmail(studentUserRes.data?.email || '');
       setZoomLink(teacherRes.data?.zoom_link || null);
+      setTeacherTimezone(teacherRes.data?.timezone || 'UTC');
+      setCourseTimezone(courseRes.data?.timezone || 'UTC');
       setReport(((reportRes.data as LessonReport[]) || [])[0] || null);
     } catch (err) {
       console.error('Error loading lesson:', err);
@@ -127,6 +135,20 @@ export function TeacherLessonDetails() {
     return <div>Lesson not found</div>;
   }
 
+  // Determine display times - teacher sees in their timezone
+  const teacherTz = teacherTimezone;
+  const courseTz = courseTimezone;
+  
+  const displayStartTime = lesson.start_time_utc 
+    ? formatTimeInTimezone(lesson.start_time_utc, teacherTz) 
+    : lesson.start_time;
+  const displayEndTime = lesson.end_time_utc 
+    ? formatTimeInTimezone(lesson.end_time_utc, teacherTz) 
+    : lesson.end_time;
+  const displayDate = lesson.start_time_utc 
+    ? formatDateInTimezone(lesson.start_time_utc, teacherTz) 
+    : lesson.scheduled_date;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
@@ -150,11 +172,11 @@ export function TeacherLessonDetails() {
           <CardContent className="space-y-4">
             <div className="flex items-center gap-2">
               <Calendar className="h-4 w-4 text-muted-foreground" />
-              <span>{formatDate(lesson.scheduled_date)}</span>
+              <span>{formatDate(displayDate)}</span>
             </div>
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-muted-foreground" />
-              <span>{formatTime(lesson.start_time)} - {formatTime(lesson.end_time)}</span>
+              <span>{formatTime(displayStartTime)} - {formatTime(displayEndTime)}</span>
             </div>
             {lesson.subject?.name && (
               <div className="flex items-center gap-2">
@@ -165,6 +187,10 @@ export function TeacherLessonDetails() {
             <div className="flex items-center gap-2">
               <Video className="h-4 w-4 text-muted-foreground" />
               <span>Platform: {lesson.meeting_platform}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Globe className="h-4 w-4 text-muted-foreground" />
+              <span>Course Timezone: {courseTimezone} (Teacher sees in {teacherTimezone})</span>
             </div>
           </CardContent>
         </Card>
@@ -306,4 +332,15 @@ export function TeacherLessonDetails() {
       </div>
     </div>
   );
+}
+
+function getStatusVariant(status: string) {
+  switch (status) {
+    case 'scheduled': return 'info';
+    case 'live': return 'warning';
+    case 'completed': return 'success';
+    case 'cancelled': return 'destructive';
+    case 'absent': return 'secondary';
+    default: return 'default';
+  }
 }

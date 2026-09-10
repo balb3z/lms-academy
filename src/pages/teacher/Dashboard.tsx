@@ -8,9 +8,8 @@ import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Lesson } from '@/types';
 import { formatTime } from '@/utils/format';
-import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
-import { Play, FileText, Video } from 'lucide-react';
-import { toast } from 'react-toastify';
+import { formatTimeInTimezone, formatDateInTimezone, getCurrentDateInTimezone } from '@/utils/timezone';
+import { Play, FileText, Users, Calendar, Clock, Video } from 'lucide-react';
 
 export function TeacherDashboard() {
   const { user } = useAuth();
@@ -18,57 +17,67 @@ export function TeacherDashboard() {
   const [todayLessons, setTodayLessons] = useState<Lesson[]>([]);
   const [pendingReports, setPendingReports] = useState<Lesson[]>([]);
   const [zoomLink, setZoomLink] = useState<string | null>(null);
+  const [teacherTimezone, setTeacherTimezone] = useState<string>('UTC');
   const [stats, setStats] = useState({
     totalStudents: 0,
     todayLessons: 0,
     completedLessons: 0,
-    attendanceRate: 0,
-    earnings: 0,
+    attendanceRate: 0
   });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
+    if (user) {
+      fetchTeacherData();
+    }
+  }, [user]);
 
-    fetchTeacherData();
-
-    // Re-fetch whenever a lesson row changes for this teacher (e.g. status
-    // flips to 'completed' after submitting the end-meeting report).
-    const channel = supabase
-      .channel('teacher-lessons-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'lessons', filter: `teacher_id=eq.${user.id}` },
-        () => { fetchTeacherData(); },
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
-  // Attach student names + subjects using separate round-trips instead of the
-  // broken `profile:user_id(...)` embed that previously failed the whole query.
-  const attachRelations = async (rows: { student_id: string; subject_id?: string }[]): Promise<Lesson[]> => {
+  // Helper to attach student names + subjects + course timezone to lessons
+  const attachRelations = async (rows: { student_id: string; subject_id?: string; course_id?: string; start_time_utc?: string }[]): Promise<Lesson[]> => {
     if (!rows || rows.length === 0) return [];
 
     const studentIds = [...new Set(rows.map(r => r.student_id).filter(Boolean))];
     const subjectIds = [...new Set(rows.map(r => r.subject_id).filter(Boolean))];
+    const courseIds = [...new Set(rows.map(r => r.course_id).filter(Boolean))];
 
-    const [studentProfilesRes, subjectsRes] = await Promise.all([
+    const [studentProfilesRes, subjectsRes, coursesRes] = await Promise.all([
       studentIds.length > 0
         ? supabase.from('profiles').select('id, full_name').in('id', studentIds)
         : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
       subjectIds.length > 0
         ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
         : Promise.resolve({ data: [] as { id: string; name: string; color: string }[] }),
+      courseIds.length > 0
+        ? supabase.from('courses').select('id, timezone').in('id', courseIds)
+        : Promise.resolve({ data: [] as { id: string; timezone: string }[] }),
     ]);
+
+    const courseTimezoneMap: Record<string, string> = {};
+    (coursesRes.data || []).forEach((c: any) => {
+      courseTimezoneMap[c.id] = c.timezone || 'UTC';
+    });
 
     return rows.map(r => {
       const sp = (studentProfilesRes.data || []).find((p: { id: string; full_name: string }) => p.id === r.student_id);
       const subj = (subjectsRes.data || []).find((s: { id: string; name: string; color: string }) => s.id === r.subject_id);
+      const courseTz = r.course_id ? courseTimezoneMap[r.course_id] || 'UTC' : 'UTC';
+      
+      // Convert lesson times to teacher's timezone for display
+      let displayStartTime = r.start_time;
+      let displayEndTime = r.end_time;
+      let displayDate = r.scheduled_date;
+      
+      if (r.start_time_utc) {
+        displayStartTime = formatTimeInTimezone(r.start_time_utc, teacherTimezone);
+        displayEndTime = formatTimeInTimezone(r.end_time_utc, teacherTimezone);
+        displayDate = formatDateInTimezone(r.start_time_utc, teacherTimezone);
+      }
+      
       return {
         ...r,
+        start_time: displayStartTime,
+        end_time: displayEndTime,
+        scheduled_date: displayDate,
         student: { id: r.student_id, profile: sp ? { id: sp.id, full_name: sp.full_name } : undefined },
         subject: subj || undefined,
       };
@@ -76,8 +85,8 @@ export function TeacherDashboard() {
   };
 
   const fetchTeacherData = async () => {
-    const today = new Date().toISOString().split('T')[0];
     const teacherId = user?.id;
+    setLoading(true);
 
     try {
       // Teacher's own record (for the personal Zoom link and timezone)
@@ -87,36 +96,47 @@ export function TeacherDashboard() {
         .eq('id', teacherId)
         .single();
       setZoomLink(teacherRow?.zoom_link || null);
-      const tz = teacherRow?.timezone || 'UTC';
+      setTeacherTimezone(teacherRow?.timezone || 'UTC');
 
-      // Today's lessons — driven directly by teacher_id so ALL of the teacher's
-      // lessons appear (course-generated and manually scheduled alike).
-      const { data: todayRows, error: todayError } = await supabase
-        .from('lessons')
-        .select('*')
+      // 1. Get teacher's courses with timezones
+      const { data: courses } = await supabase
+        .from('courses')
+        .select('id, timezone')
         .eq('teacher_id', teacherId)
-        .eq('scheduled_date', today)
-        .order('start_time');
+        .eq('status', 'active');
 
-      if (todayError) console.error('Error fetching today lessons:', todayError);
-      let todayEnriched = await attachRelations(todayRows || []);
-      
-      // Convert lesson times to teacher's timezone
-      todayEnriched = todayEnriched.map(lesson => {
-        if (lesson.start_time_utc) {
-          return {
-            ...lesson,
-            start_time: formatTimeInTimezone(lesson.start_time_utc, tz),
-            end_time: formatTimeInTimezone(lesson.end_time_utc, tz),
-            scheduled_date: formatDateInTimezone(lesson.start_time_utc, tz),
-          };
-        }
-        return lesson;
+      const courseTimezoneMap: Record<string, string> = {};
+      (courses || []).forEach((c: any) => {
+        if (c.timezone) courseTimezoneMap[c.id] = c.timezone;
       });
+
+      const courseIds = Object.keys(courseTimezoneMap);
       
+      // Determine "today" in each course timezone
+      const courseTodayMap: Record<string, string> = {};
+      courseIds.forEach(courseId => {
+        const tz = courseTimezoneMap[courseId] || 'UTC';
+        courseTodayMap[courseId] = getCurrentDateInTimezone(tz);
+      });
+
+      // 2. Today's lessons across all courses
+      const todayPromises = courseIds.map(courseId => {
+        const today = courseTodayMap[courseId];
+        return supabase
+          .from('lessons')
+          .select('*')
+          .eq('teacher_id', teacherId)
+          .eq('course_id', courseId)
+          .eq('scheduled_date', today)
+          .order('start_time');
+      });
+
+      const todayResults = await Promise.all(todayPromises);
+      const todayRows = todayResults.flatMap(r => r.data || []);
+      const todayEnriched = await attachRelations(todayRows);
       setTodayLessons(todayEnriched);
 
-      // Pending reports: completed lessons for this teacher that have no report.
+      // 3. Pending reports: completed lessons for this teacher that have no report
       const { data: completedRows } = await supabase
         .from('lessons')
         .select('*')
@@ -126,49 +146,30 @@ export function TeacherDashboard() {
 
       let pending: Lesson[] = [];
       if (completedRows && completedRows.length > 0) {
-        const completedIds = completedRows.map((l: { id: string }) => l.id);
+        const completedIds = completedRows.map((l: any) => l.id);
         const { data: existingReports } = await supabase
           .from('lesson_reports')
           .select('lesson_id')
           .in('lesson_id', completedIds);
 
-        const reportedIds = new Set((existingReports || []).map((r: { lesson_id: string }) => r.lesson_id));
-        const withoutReports = completedRows.filter((l: { id: string; teacher_rate: number | null; course_id?: string; student_id: string }) => !reportedIds.has(l.id));
+        const reportedIds = new Set((existingReports || []).map((r: any) => r.lesson_id));
+        const withoutReports = completedRows.filter((l: any) => !reportedIds.has(l.id));
         pending = await attachRelations(withoutReports.slice(0, 10));
       }
       setPendingReports(pending);
 
-      // Earnings = SUM(teacher_rate) over the teacher's completed lessons.
-      // Fallback: for completed lessons that have no stamped teacher_rate yet,
-      // use the rate from their course enrollment so earnings stay consistent.
-      const completed = completedRows || [];
-      const missingRate = completed.filter((l: { teacher_rate: number | null; course_id?: string }) => l.teacher_rate == null && l.course_id);
-      const enrollmentRateMap: Record<string, number> = {};
-      if (missingRate.length > 0) {
-        const courseIds = [...new Set(missingRate.map((l: { course_id?: string }) => l.course_id).filter(Boolean))];
-        const { data: enrollments } = await supabase
-          .from('course_enrollments')
-          .select('course_id, student_id, teacher_rate')
-          .in('course_id', courseIds);
-        (enrollments || []).forEach((e: { course_id: string; student_id: string; teacher_rate: number | null }) => {
-          if (e.teacher_rate != null) {
-            enrollmentRateMap[`${e.course_id}|${e.student_id}`] = Number(e.teacher_rate);
-          }
-        });
-      }
-      const earnings = completed.reduce((sum: number, l: { teacher_rate: number | null; course_id?: string; student_id: string }) => {
-        const rate = l.teacher_rate != null
-          ? Number(l.teacher_rate)
-          : (enrollmentRateMap[`${l.course_id}|${l.student_id}`] ?? 0);
-        return sum + (rate || 0);
-      }, 0);
-
-      // Stats
+      // 4. Stats
       const { count: totalStudents } = await supabase
         .from('student_teacher_assignments')
         .select('*', { count: 'exact', head: true })
         .eq('teacher_id', teacherId)
         .eq('is_active', true);
+
+      const { count: completedLessons } = await supabase
+        .from('lessons')
+        .select('*', { count: 'exact', head: true })
+        .eq('teacher_id', teacherId)
+        .eq('status', 'completed');
 
       const { data: attendanceData } = await supabase
         .from('attendance')
@@ -181,9 +182,8 @@ export function TeacherDashboard() {
       setStats({
         totalStudents: totalStudents || 0,
         todayLessons: todayEnriched.length,
-        completedLessons: completedRows?.length || 0,
+        completedLessons: completedLessons || 0,
         attendanceRate: totalAttendance > 0 ? Math.round((presentCount / totalAttendance) * 100) : 0,
-        earnings,
       });
     } catch (error) {
       console.error('Error fetching teacher data:', error);
@@ -192,50 +192,31 @@ export function TeacherDashboard() {
     }
   };
 
-  // Resolve the link to open: the teacher's saved Zoom link takes priority,
-  // falling back to whatever is stored on the lesson.
-  const resolveLink = (lesson: Lesson) => zoomLink || lesson.meeting_url || null;
-
   const handleStartLesson = async (lesson: Lesson) => {
-    const link = resolveLink(lesson);
+    const link = lesson.teacher?.zoom_link || lesson.meeting_url;
     if (!link) {
-      toast.error('No Zoom link set. Add your personal Zoom link in your profile.');
+      toast.error('No Zoom link set. Ask management to add your personal Zoom link.');
       return;
     }
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('lessons')
-      .update({
-        status: 'live',
-        actual_start_time: new Date().toISOString(),
-      })
-      .eq('id', lesson.id);
+      .update({ status: 'live', actual_start_time: new Date().toISOString() })
+      .eq('id', lesson.id)
+      .select('id');
 
-    if (!error) {
-      window.open(link, '_blank', 'noopener,noreferrer');
-      fetchTeacherData();
-    } else {
-      toast.error('Failed to start the lesson.');
-    }
-  };
-
-  const handleJoin = (lesson: Lesson) => {
-    const link = resolveLink(lesson);
-    if (!link) {
-      toast.error('No Zoom link set. Add your personal Zoom link in your profile.');
+    if (error || !data || data.length === 0) {
+      toast.error('Could not start the lesson.');
       return;
     }
     window.open(link, '_blank', 'noopener,noreferrer');
+    fetchTeacherData();
   };
 
-  const getStatusVariant = (status: string) => {
-    switch (status) {
-      case 'scheduled': return 'info';
-      case 'live': return 'warning';
-      case 'completed': return 'success';
-      case 'cancelled': return 'destructive';
-      default: return 'default';
-    }
+  const handleJoin = (lesson: Lesson) => {
+    const link = lesson.teacher?.zoom_link || lesson.meeting_url;
+    if (link) window.open(link, '_blank', 'noopener,noreferrer');
+    else toast.error('No Zoom link set.');
   };
 
   if (loading) {
@@ -251,11 +232,11 @@ export function TeacherDashboard() {
         <div>
           <h1 className="text-3xl font-bold">{greeting}, Teacher!</h1>
           <p className="text-muted-foreground">
-            {new Date().toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric',
+            {new Date().toLocaleDateString('en-US', { 
+              weekday: 'long', 
+              year: 'numeric', 
+              month: 'long', 
+              day: 'numeric' 
             })}
           </p>
         </div>
@@ -263,23 +244,6 @@ export function TeacherDashboard() {
           <div>{stats.totalStudents} Students</div>
           <div>Attendance: {stats.attendanceRate}%</div>
         </div>
-      </div>
-
-      {!zoomLink && (
-        <Card className="border-yellow-200 bg-yellow-50">
-          <CardContent className="py-3 text-sm text-yellow-800">
-            You have no personal Zoom link set yet. Ask management to add it so your
-            "Start Meeting" button and your students' "Enter" button work.
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <StatsCard title="Today's Lessons" value={stats.todayLessons} icon="calendar" />
-        <StatsCard title="Total Students" value={stats.totalStudents} icon="users" />
-        <StatsCard title="Completed" value={stats.completedLessons} icon="check" />
-        <StatsCard title="Attendance Rate" value={`${stats.attendanceRate}%`} icon="attendance" />
-        <StatsCard title="Earnings" value={stats.earnings.toFixed(2)} icon="attendance" />
       </div>
 
       {pendingReports.length > 0 && (
@@ -297,7 +261,7 @@ export function TeacherDashboard() {
                   <div>
                     <p className="font-medium">{lesson.student?.profile?.full_name || 'Student'}</p>
                     <p className="text-sm text-muted-foreground">
-                      {lesson.title} • {lesson.scheduled_date} at {formatTime(lesson.start_time)}
+                      {lesson.title} • {lesson.scheduled_date} at {lesson.start_time}
                     </p>
                   </div>
                   <Button onClick={() => navigate(`/teacher/lessons/${lesson.id}/report`)}>
@@ -309,6 +273,13 @@ export function TeacherDashboard() {
           </CardContent>
         </Card>
       )}
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <StatsCard title="Today's Lessons" value={stats.todayLessons} icon="calendar" />
+        <StatsCard title="Total Students" value={stats.totalStudents} icon="users" />
+        <StatsCard title="Completed" value={stats.completedLessons} icon="check" />
+        <StatsCard title="Attendance Rate" value={`${stats.attendanceRate}%`} icon="attendance" />
+      </div>
 
       <Card>
         <CardHeader>
@@ -325,13 +296,13 @@ export function TeacherDashboard() {
                 <div key={lesson.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/50 transition-colors">
                   <div className="flex items-center gap-4">
                     <div className="text-center min-w-[60px]">
-                      <div className="text-sm font-medium">{formatTime(lesson.start_time)}</div>
-                      <div className="text-xs text-muted-foreground">{formatTime(lesson.end_time)}</div>
+                      <div className="text-sm font-medium">{lesson.start_time}</div>
+                      <div className="text-xs text-muted-foreground">{lesson.end_time}</div>
                     </div>
                     <div>
                       <p className="font-medium">{lesson.title}</p>
                       <p className="text-sm text-muted-foreground">
-                        {[lesson.subject?.name, lesson.student?.profile?.full_name].filter(Boolean).join(' • ')}
+                        {[lesson.subject?.name, lesson.student?.profile?.full_name].filter(Boolean).join(' · ')}
                       </p>
                     </div>
                     <Badge variant={getStatusVariant(lesson.status)}>
@@ -346,15 +317,10 @@ export function TeacherDashboard() {
                       </Button>
                     )}
                     {lesson.status === 'live' && (
-                      <>
-                        <Button variant="outline" onClick={() => handleJoin(lesson)}>
-                          <Video className="h-4 w-4 mr-2" />
-                          Join
-                        </Button>
-                        <Button onClick={() => navigate(`/teacher/lessons/${lesson.id}/report`)}>
-                          End Meeting
-                        </Button>
-                      </>
+                      <Button variant="outline" onClick={() => handleJoin(lesson)}>
+                        <Video className="h-4 w-4 mr-2" />
+                        Join Meeting
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -365,4 +331,14 @@ export function TeacherDashboard() {
       </Card>
     </div>
   );
+}
+
+function getStatusVariant(status: string) {
+  switch (status) {
+    case 'scheduled': return 'info';
+    case 'live': return 'warning';
+    case 'completed': return 'success';
+    case 'cancelled': return 'destructive';
+    default: return 'default';
+  }
 }

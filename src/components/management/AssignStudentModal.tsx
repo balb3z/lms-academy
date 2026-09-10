@@ -23,6 +23,7 @@ export interface AssignStudentCourse {
   preferred_days: string[];
   preferred_time: string;
   start_date: string;
+  timezone: string;
 }
 
 interface Props {
@@ -134,6 +135,7 @@ export function AssignStudentModal({ open, onClose, onSuccess, course, excludeSt
         createdBy: user?.id,
         meetingUrl: teacherZoom,
         teacherRate: teacherRateNum,
+        courseTimezone: course.timezone || 'UTC',
       });
 
       if (lessonRows.length === 0) {

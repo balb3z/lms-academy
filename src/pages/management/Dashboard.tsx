@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { supabase } from '@/lib/supabase/client';
 import { formatTime } from '@/utils/format';
+import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
 import { Lesson } from '@/types';
-import { Plus, Users, UserCog, BookOpen, GraduationCap } from 'lucide-react';
+import { Calendar, Plus, Users, UserCog, BookOpen, GraduationCap } from 'lucide-react';
 import { AddLessonModal } from '@/components/management/AddLessonModal';
 import { AddStudentModal } from '@/components/management/AddStudentModal';
 import { AddTeacherModal } from '@/components/management/AddTeacherModal';
@@ -34,15 +35,62 @@ export function ManagementDashboard() {
     fetchDashboardData();
   }, []);
 
+// Helper to attach student/teacher names + subjects to lessons
+  async function attachRelations(rows: { student_id: string; teacher_id: string; subject_id?: string; start_time_utc?: string }[]): Promise<Lesson[]> {
+    if (!rows || rows.length === 0) return [];
+
+    const studentIds = [...new Set(rows.map(l => l.student_id).filter(Boolean))];
+    const teacherIds = [...new Set(rows.map(l => l.teacher_id).filter(Boolean))];
+    const subjectIds = [...new Set(rows.map(l => l.subject_id).filter(Boolean))];
+
+    const [spRes, tpRes, subjectsRes] = await Promise.all([
+      supabase.from('profiles').select('id, full_name').in('id', studentIds),
+      supabase.from('profiles').select('id, full_name').in('id', teacherIds),
+      subjectIds.length > 0
+        ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+
+    return rows.map(l => {
+      const sp = (spRes.data || []).find((p: any) => p.id === l.student_id);
+      const tp = (tpRes.data || []).find((p: any) => p.id === l.teacher_id);
+      const subj = (subjectsRes.data || []).find((s: any) => s.id === l.subject_id);
+      
+      // Convert times to course timezone for display (management sees course timezone)
+      let displayStartTime = l.start_time;
+      let displayEndTime = l.end_time;
+      let displayDate = l.scheduled_date;
+      
+      if (l.start_time_utc) {
+        // For management, we need to know the course timezone
+        // We'll fetch it if needed, for now use the stored local time
+        // The scheduled_date and start_time are already in course timezone
+        displayStartTime = l.start_time;
+        displayEndTime = l.end_time;
+        displayDate = l.scheduled_date;
+      }
+      
+      return {
+        ...l,
+        start_time: displayStartTime,
+        end_time: displayEndTime,
+        scheduled_date: displayDate,
+        student: { id: l.student_id, profile: sp ? { id: sp.id, full_name: sp.full_name } : undefined },
+        teacher: { id: l.teacher_id, profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined },
+        subject: subj || undefined,
+      };
+    });
+  }
+
   const fetchDashboardData = async () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0]; // UTC today
 
     try {
       const [
         { count: totalStudents },
         { count: totalTeachers },
         { count: totalCourses },
-        { count: todayLessons },
+        { count: todayLessonsCount },
         { count: upcomingLessons },
         { count: completedLessons },
       ] = await Promise.all([
@@ -68,23 +116,7 @@ export function ManagementDashboard() {
       let enrichedLessons: Lesson[] = [];
 
       if (lessonRows && lessonRows.length > 0) {
-        const studentIds = [...new Set(lessonRows.map((l: { student_id: string }) => l.student_id))];
-        const teacherIds = [...new Set(lessonRows.map((l: { teacher_id: string }) => l.teacher_id))];
-
-        const [spRes, tpRes] = await Promise.all([
-          supabase.from('profiles').select('id, full_name').in('id', studentIds),
-          supabase.from('profiles').select('id, full_name').in('id', teacherIds),
-        ]);
-
-        enrichedLessons = lessonRows.map((l: { student_id: string; teacher_id: string }) => {
-          const sp = (spRes.data || []).find((p) => p.id === l.student_id);
-          const tp = (tpRes.data || []).find((p) => p.id === l.teacher_id);
-          return {
-            ...l,
-            student: { id: l.student_id, profile: sp ? { id: sp.id, full_name: sp.full_name } : undefined },
-            teacher: { id: l.teacher_id, profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined },
-          };
-        });
+        enrichedLessons = await attachRelations(lessonRows);
       }
 
       setTodayLessons(enrichedLessons);
@@ -92,7 +124,7 @@ export function ManagementDashboard() {
         totalStudents: totalStudents || 0,
         totalTeachers: totalTeachers || 0,
         totalCourses: totalCourses || 0,
-        todayLessons: todayLessons || 0,
+        todayLessons: todayLessonsCount || 0,
         upcomingLessons: upcomingLessons || 0,
         completedLessons: completedLessons || 0,
       });
@@ -124,11 +156,11 @@ export function ManagementDashboard() {
         <div>
           <h1 className="text-3xl font-bold">Dashboard</h1>
           <p className="text-muted-foreground">
-            {new Date().toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric',
+            {new Date().toLocaleDateString('en-US', { 
+              weekday: 'long', 
+              year: 'numeric', 
+              month: 'long', 
+              day: 'numeric' 
             })}
           </p>
         </div>
@@ -202,7 +234,7 @@ export function ManagementDashboard() {
             </div>
           ) : (
             <div className="space-y-4">
-              {todayLessons.map(lesson => (
+              {todayLessons.map((lesson) => (
                 <div
                   key={lesson.id}
                   className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/50 transition-colors"
@@ -269,4 +301,15 @@ export function ManagementDashboard() {
       />
     </div>
   );
+}
+
+const getStatusVariant = (status: string) => {
+  switch (status) {
+    case 'scheduled': return 'info';
+    case 'live': return 'warning';
+    case 'completed': return 'success';
+    case 'cancelled': return 'destructive';
+    case 'absent': return 'secondary';
+    default: return 'default';
+  }
 }

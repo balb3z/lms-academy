@@ -105,6 +105,11 @@ CREATE POLICY "Teacher view own lessons" ON public.lessons
   FOR SELECT
   USING (teacher_id = auth.uid());
 
+-- Lessons: teacher can create lessons
+CREATE POLICY "Teacher create lessons" ON public.lessons
+  FOR INSERT
+  WITH CHECK (teacher_id = auth.uid());
+
 -- Lessons: student can view their own lessons
 CREATE POLICY "Student view own lessons" ON public.lessons
   FOR SELECT
@@ -194,6 +199,13 @@ CREATE POLICY "Teacher view course enrollments" ON public.course_enrollments
     course_id IN (SELECT id FROM public.courses WHERE teacher_id = auth.uid())
   );
 
+-- Course enrollments: teacher can create enrollments for their courses
+CREATE POLICY "Teacher create course enrollments" ON public.course_enrollments
+  FOR INSERT
+  WITH CHECK (
+    course_id IN (SELECT id FROM public.courses WHERE teacher_id = auth.uid())
+  );
+
 -- Course enrollments: student can view their enrollments
 CREATE POLICY "Student view own enrollments" ON public.course_enrollments
   FOR SELECT
@@ -201,6 +213,33 @@ CREATE POLICY "Student view own enrollments" ON public.course_enrollments
 
 -- Course enrollments: management full access
 CREATE POLICY "Management full access course_enrollments" ON public.course_enrollments
+  FOR ALL
+  USING (public.is_management_user(auth.uid()));
+
+-- Course enrollments: management full access
+CREATE POLICY "Management full access course_enrollments" ON public.course_enrollments
+  FOR ALL
+  USING (public.is_management_user(auth.uid()));
+
+-- Student-Teacher Assignments: teacher can view their assignments
+CREATE POLICY "Teacher view student assignments" ON public.student_teacher_assignments
+  FOR SELECT
+  USING (teacher_id = auth.uid());
+
+-- Student-Teacher Assignments: teacher can create assignments for their courses
+CREATE POLICY "Teacher create student assignments" ON public.student_teacher_assignments
+  FOR INSERT
+  WITH CHECK (
+    teacher_id = auth.uid()
+  );
+
+-- Student-Teacher Assignments: student can view their assignments
+CREATE POLICY "Student view teacher assignments" ON public.student_teacher_assignments
+  FOR SELECT
+  USING (student_id = auth.uid());
+
+-- Student-Teacher Assignments: management full access
+CREATE POLICY "Management full access student_teacher_assignments" ON public.student_teacher_assignments
   FOR ALL
   USING (public.is_management_user(auth.uid()));
 

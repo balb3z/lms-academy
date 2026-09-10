@@ -65,7 +65,7 @@ function formatTimezoneLabel(tz: string): string {
 }
 
 /**
- * Convert a local time in a specific timezone to UTC ISO string.
+ * Convert a local date/time in a specific timezone to UTC ISO string.
  * @param dateStr - YYYY-MM-DD (in the target timezone)
  * @param timeStr - HH:MM (in the target timezone)
  * @param timezone - IANA timezone identifier
@@ -75,16 +75,36 @@ export function localToUtc(dateStr: string, timeStr: string, timezone: string): 
   const [year, month, day] = dateStr.split('-').map(Number);
   const [hour, minute] = timeStr.split(':').map(Number);
   
-  // Create date in the target timezone
-  const date = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
+  // Create a date representing the local time in the target timezone
+  // We use a fixed date to determine the offset for that specific date
+  const testDate = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
   
-  // Get the UTC equivalent by formatting in UTC and comparing
-  const utcDate = new Date(date.getTime());
-  const tzDate = new Date(utcDate.toLocaleString('en-US', { timeZone: timezone }));
-  const offsetMs = tzDate.getTime() - utcDate.getTime();
+  // Get the offset for this specific date in the target timezone
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZoneName: 'shortOffset',
+  });
   
-  // The actual UTC time is the local time minus the offset
-  const actualUtc = new Date(date.getTime() - offsetMs);
+  // Format the test date in the target timezone to get the offset
+  const formatted = formatter.format(testDate);
+  
+  // Parse the offset from the formatted string (e.g., "GMT+2:00")
+  const offsetMatch = formatted.match(/GMT([+-])(\d{1,2}):(\d{2})/);
+  let offsetMinutes = 0;
+  if (offsetMatch) {
+    const sign = offsetMatch[1] === '+' ? 1 : -1;
+    const hours = parseInt(offsetMatch[2], 10);
+    const minutes = parseInt(offsetMatch[3], 10);
+    offsetMinutes = sign * (hours * 60 + minutes);
+  }
+  
+  // The test date was created as if it were UTC, but it represents local time
+  // To get the actual UTC time, we need to subtract the offset
+  const actualUtc = new Date(testDate.getTime() - offsetMinutes * 60 * 1000);
   return actualUtc.toISOString();
 }
 
@@ -195,7 +215,7 @@ export function formatDateInTimezone(utcIso: string | null | undefined, timezone
 }
 
 /**
- * Get the current user's timezone from their profile or default to UTC.
+ * Get the user's timezone from their profile or default to UTC.
  */
 export function getUserTimezone(userTimezone?: string): string {
   return userTimezone || 'UTC';
@@ -230,4 +250,20 @@ export function getTimezoneOffsetLabel(timezone: string, date = new Date()): str
   } catch {
     return timezone;
   }
+}
+
+/**
+ * Get the current date in a specific timezone as YYYY-MM-DD
+ */
+export function getCurrentDateInTimezone(timezone: string): string {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = formatter.formatToParts(now);
+  const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
 }

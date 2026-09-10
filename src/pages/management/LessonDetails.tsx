@@ -16,6 +16,92 @@ const RATING_LABEL: Record<string, string> = {
   needs_improvement: 'Needs Improvement',
 };
 
+type BadgeVariant = 'success' | 'info' | 'warning' | 'destructive' | 'secondary' | 'default';
+
+const RATING_VARIANT: Record<string, BadgeVariant> = {
+  excellent: 'success',
+  very_good: 'success',
+  good: 'info',
+  needs_improvement: 'warning',
+};
+
+// Separate component for the lesson report to avoid JSX parsing issues
+function LessonReportCard({ report }: { report: LessonReport }) {
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ClipboardList className="h-5 w-5" />
+            Lesson Report
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Award className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Grade:</span>
+              {report.performance_rating
+                ? <Badge variant="info">{RATING_LABEL[report.performance_rating] ?? report.performance_rating}</Badge>
+                : <span className="text-sm">-</span>}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Attendance:</span>
+              <Badge variant="secondary">{report.attendance_status}</Badge>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Visible to student:</span>
+              <Badge variant={report.is_visible_to_student ? 'success' : 'secondary'}>
+                {report.is_visible_to_student ? 'Yes' : 'No'}
+              </Badge>
+            </div>
+          </div>
+
+          {report.topics_covered && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">What Was Covered</p>
+              <p className="whitespace-pre-wrap text-sm">{report.topics_covered}</p>
+            </div>
+          )}
+
+          <div className="rounded-lg border bg-muted/30 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Homework / To-Submit</p>
+            <p className="whitespace-pre-wrap text-sm">{report.homework || 'No homework assigned.'}</p>
+          </div>
+
+          {(report.student_performance || report.strengths || report.weaknesses || report.next_lesson_plan) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {report.student_performance && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Performance</p>
+                  <p className="whitespace-pre-wrap text-sm">{report.student_performance}</p>
+                </div>
+              )}
+              {report.strengths && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Strengths</p>
+                  <p className="whitespace-pre-wrap text-sm">{report.strengths}</p>
+                </div>
+              )}
+              {report.weaknesses && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Areas to Improve</p>
+                  <p className="whitespace-pre-wrap text-sm">{report.weaknesses}</p>
+                </div>
+              )}
+              {report.next_lesson_plan && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Next Lesson Plan</p>
+                  <p className="whitespace-pre-wrap text-sm">{report.next_lesson_plan}</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </>
+    );
+  }
+
 export function LessonDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -102,6 +188,27 @@ export function LessonDetails() {
     return <div>Lesson not found</div>;
   }
 
+  // Pre-compute all conditional content as variables to avoid JSX ternary parsing issues
+  const completedLessonMessage = lesson.status === 'completed' ? (
+    <Card className="md:col-span-2">
+      <CardContent className="py-6 text-center text-muted-foreground">
+        This lesson is completed. The report is not available yet.
+      </CardContent>
+    </Card>
+  ) : null;
+
+  const lessonReport = report ? (
+    <>
+      <LessonReportCard report={report} />
+    </>
+  ) : lesson.status === 'completed' ? (
+    <Card className="md:col-span-2">
+      <CardContent className="py-6 text-center text-muted-foreground">
+        This lesson is completed. The report is not available yet.
+      </CardContent>
+    </Card>
+  ) : null;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
@@ -150,28 +257,12 @@ export function LessonDetails() {
             )}
             <div className="flex items-center gap-2">
               <Globe className="h-4 w-4 text-muted-foreground" />
-              <span>Course Timezone: {courseTimezone} {getTimezoneOffsetLabel(courseTimezone)}</span>
+              <span>Course Timezone: {lesson.timezone} {getTimezoneOffsetLabel(lesson.timezone)}</span>
             </div>
             <div className="flex items-center gap-2">
               <Globe className="h-4 w-4 text-muted-foreground" />
               <span>Teacher Timezone: {teacherTimezone} {getTimezoneOffsetLabel(teacherTimezone)}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-muted-foreground" />
-              <span>Scheduled (Course TZ): {formatDate(lesson.scheduled_date)} at {formatTime(lesson.start_time)} - {formatTime(lesson.end_time)}</span>
-            </div>
-            {lesson.start_time_utc && (
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                <span>Teacher View: {formatDateInTimezone(lesson.start_time_utc, teacherTimezone)} at {formatTimeInTimezone(lesson.start_time_utc, teacherTimezone)} ({teacherTimezone})</span>
-              </div>
-            )}
-            {lesson.start_time_utc && (
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                <span>Student View: {formatDateInTimezone(lesson.start_time_utc, courseTimezone)} at {formatTimeInTimezone(lesson.start_time_utc, courseTimezone)} ({courseTimezone})</span>
-              </div>
-            )}
           </CardContent>
         </Card>
 
@@ -204,80 +295,20 @@ export function LessonDetails() {
           </Card>
         )}
 
-        {/* Same report the teacher submitted and the student sees */}
-        {report && (
-          <Card className="md:col-span-2">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ClipboardList className="h-5 w-5" />
-                Lesson Report
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <div className="flex flex-wrap items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Award className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">Grade:</span>
-                  {report.performance_rating
-                    ? <Badge variant="info">{RATING_LABEL[report.performance_rating] ?? report.performance_rating}</Badge>
-                    : <span className="text-sm">-</span>}
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Attendance:</span>
-                  <Badge variant="secondary">{report.attendance_status}</Badge>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Visible to student:</span>
-                  <Badge variant={report.is_visible_to_student ? 'success' : 'secondary'}>
-                    {report.is_visible_to_student ? 'Yes' : 'No'}
-                  </Badge>
-                </div>
-              </div>
-
-              {report.topics_covered && (
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">What Was Covered</p>
-                  <p className="whitespace-pre-wrap text-sm">{report.topics_covered}</p>
-                </div>
-              )}
-
-              <div className="rounded-lg border bg-muted/30 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Homework / To-Submit</p>
-                <p className="whitespace-pre-wrap text-sm">{report.homework || 'No homework assigned.'}</p>
-              </div>
-
-              {(report.student_performance || report.strengths || report.weaknesses || report.next_lesson_plan) && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {report.student_performance && (
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Performance</p>
-                      <p className="whitespace-pre-wrap text-sm">{report.student_performance}</p>
-                    </div>
-                  )}
-                  {report.strengths && (
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Strengths</p>
-                      <p className="whitespace-pre-wrap text-sm">{report.strengths}</p>
-                    </div>
-                  )}
-                  {report.weaknesses && (
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Areas to Improve</p>
-                      <p className="whitespace-pre-wrap text-sm">{report.weaknesses}</p>
-                    </div>
-                  )}
-                  {report.next_lesson_plan && (
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Next Lesson Plan</p>
-                      <p className="whitespace-pre-wrap text-sm">{report.next_lesson_plan}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
+        {lessonReport}
+        {completedLessonMessage}
       </div>
     </div>
   );
+}
+
+const getStatusVariant = (status: string) => {
+  switch (status) {
+    case 'scheduled': return 'info';
+    case 'live': return 'warning';
+    case 'completed': return 'success';
+    case 'cancelled': return 'destructive';
+    case 'absent': return 'secondary';
+    default: return 'default';
+  }
 }

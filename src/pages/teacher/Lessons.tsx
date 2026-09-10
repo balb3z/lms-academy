@@ -10,38 +10,52 @@ import { useAuth } from '@/hooks/useAuth';
 import { Lesson } from '@/types';
 import { Search, Eye, Calendar } from 'lucide-react';
 import { formatDate, formatTime } from '@/utils/format';
-import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
+import { formatTimeInTimezone, formatDateInTimezone, getCurrentDateInTimezone } from '@/utils/timezone';
 
 export function TeacherLessons() {
   const { user } = useAuth();
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [teacherTimezone, setTeacherTimezone] = useState<string>('UTC');
   const navigate = useNavigate();
 
   useEffect(() => {
     if (user) {
+      fetchTeacherData();
       fetchLessons();
     }
   }, [user]);
+
+  const fetchTeacherData = async () => {
+    const teacherId = user?.id;
+    const { data: teacherRow } = await supabase
+      .from('teachers')
+      .select('timezone')
+      .eq('id', teacherId)
+      .single();
+    setTeacherTimezone(teacherRow?.timezone || 'UTC');
+  };
 
   const fetchLessons = async () => {
     const teacherId = user?.id;
     setLoading(true);
 
     try {
-      // Get teacher's timezone
-      const { data: teacherRow } = await supabase
-        .from('teachers')
-        .select('timezone')
-        .eq('id', teacherId)
-        .single();
-      const tz = teacherRow?.timezone || 'UTC';
+      // Get teacher's courses with timezones
+      const { data: courses } = await supabase
+        .from('courses')
+        .select('id, timezone')
+        .eq('teacher_id', teacherId)
+        .eq('status', 'active');
+
+      const courseTimezoneMap: Record<string, string> = {};
+      (courses || []).forEach((c: any) => {
+        if (c.timezone) courseTimezoneMap[c.id] = c.timezone;
+      });
 
       // Query lessons directly by teacher_id so every lesson the teacher owns
-      // appears — including course-generated ones. (Previously this filtered
-      // through student_teacher_assignments and used a broken profile:user_id
-      // embed, so course lessons never showed.)
+      // appears — including course-generated ones.
       const { data: rows, error } = await supabase
         .from('lessons')
         .select('*')
@@ -59,29 +73,39 @@ export function TeacherLessons() {
       const lessonRows = rows || [];
       const studentIds = [...new Set(lessonRows.map((l: any) => l.student_id).filter(Boolean))];
       const subjectIds = [...new Set(lessonRows.map((l: any) => l.subject_id).filter(Boolean))];
+      const courseIds = [...new Set(lessonRows.map((l: any) => l.course_id).filter(Boolean))];
 
-      const [profilesRes, subjectsRes] = await Promise.all([
+      const [profilesRes, subjectsRes, coursesRes] = await Promise.all([
         studentIds.length > 0
           ? supabase.from('profiles').select('id, full_name').in('id', studentIds)
           : Promise.resolve({ data: [] as any[] }),
         subjectIds.length > 0
           ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
           : Promise.resolve({ data: [] as any[] }),
+        courseIds.length > 0
+          ? supabase.from('courses').select('id, timezone').in('id', courseIds)
+          : Promise.resolve({ data: [] as any[] }),
       ]);
+
+      const courseTimezoneMap: Record<string, string> = {};
+      (coursesRes.data || []).forEach((c: any) => {
+        if (c.timezone) courseTimezoneMap[c.id] = c.timezone;
+      });
 
       const enriched: Lesson[] = lessonRows.map((l: any) => {
         const sp = (profilesRes.data || []).find((p: any) => p.id === l.student_id);
         const subj = (subjectsRes.data || []).find((s: any) => s.id === l.subject_id);
+        const courseTz = l.course_id ? courseTimezoneMap[l.course_id] || 'UTC' : 'UTC';
         
-        // Convert times to teacher's timezone
+        // Convert times to teacher's timezone for display
         let displayStartTime = l.start_time;
         let displayEndTime = l.end_time;
         let displayDate = l.scheduled_date;
         
         if (l.start_time_utc) {
-          displayStartTime = formatTimeInTimezone(l.start_time_utc, tz);
-          displayEndTime = formatTimeInTimezone(l.end_time_utc, tz);
-          displayDate = formatDateInTimezone(l.start_time_utc, tz);
+          displayStartTime = formatTimeInTimezone(l.start_time_utc, teacherTimezone);
+          displayEndTime = formatTimeInTimezone(l.end_time_utc, teacherTimezone);
+          displayDate = formatDateInTimezone(l.start_time_utc, teacherTimezone);
         }
         
         return {
@@ -202,4 +226,15 @@ export function TeacherLessons() {
       </Card>
     </div>
   );
+}
+
+function getStatusVariant(status: string) {
+  switch (status) {
+    case 'scheduled': return 'info';
+    case 'live': return 'warning';
+    case 'completed': return 'success';
+    case 'cancelled': return 'destructive';
+    case 'absent': return 'secondary';
+    default: return 'default';
+  }
 }
