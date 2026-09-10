@@ -18,24 +18,43 @@ export function StudentProfile() {
   }, [id]);
 
   const fetchStudent = async () => {
-    const { data } = await supabase
-      .from('students')
-      .select(`
-        *,
-        profile:user_id (
-          full_name,
-          email,
-          phone,
-          avatar_url,
-          date_of_birth,
-          address
-        )
-      `)
-      .eq('id', id)
-      .single();
+    setLoading(true);
+    try {
+      const { data: studentData, error } = await supabase
+        .from('students')
+        .select('*')
+        .eq('id', id)
+        .single();
 
-    setStudent(data);
-    setLoading(false);
+      if (error || !studentData) {
+        setStudent(null);
+        setLoading(false);
+        return;
+      }
+
+      // Resolve profile + user email separately (no broken profile:user_id embed)
+      const [profileRes, userRes] = await Promise.all([
+        supabase.from('profiles').select('full_name, phone, avatar_url, date_of_birth, address').eq('id', studentData.id).single(),
+        supabase.from('users').select('email').eq('id', studentData.id).single(),
+      ]);
+
+      setStudent({
+        ...studentData,
+        profile: profileRes.data ? {
+          id: profileRes.data.id,
+          full_name: profileRes.data.full_name,
+          phone: profileRes.data.phone,
+          avatar_url: profileRes.data.avatar_url,
+          date_of_birth: profileRes.data.date_of_birth,
+          address: profileRes.data.address,
+          email: userRes.data?.email,
+        } : undefined,
+      });
+    } catch (err) {
+      console.error('Error loading student:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (loading) {
@@ -83,7 +102,7 @@ export function StudentProfile() {
             <CardContent className="space-y-3">
               <div className="flex items-center gap-2">
                 <Mail className="h-4 w-4 text-muted-foreground" />
-                <span>{student.profile?.email}</span>
+                <span>{student.profile?.email || 'Not provided'}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Phone className="h-4 w-4 text-muted-foreground" />

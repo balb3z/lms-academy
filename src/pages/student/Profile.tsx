@@ -30,31 +30,52 @@ export function StudentProfilePage() {
   }, [user]);
 
   const fetchProfile = async () => {
-    const { data } = await supabase
-      .from('students')
-      .select(`
-        *,
-        profile:user_id (
-          full_name,
-          phone,
-          address
-        )
-      `)
-      .eq('id', user?.id)
-      .single();
+    setLoading(true);
+    try {
+      const { data: studentData, error } = await supabase
+        .from('students')
+        .select('*')
+        .eq('id', user?.id)
+        .single();
 
-    setStudent(data);
-    if (data) {
+      if (error || !studentData) {
+        setStudent(null);
+        setLoading(false);
+        return;
+      }
+
+      // Resolve profile + user email separately (no broken profile:user_id embed)
+      const [profileRes, userRes] = await Promise.all([
+        supabase.from('profiles').select('full_name, phone, address, avatar_url').eq('id', studentData.id).single(),
+        supabase.from('users').select('email').eq('id', studentData.id).single(),
+      ]);
+
+      const s = {
+        ...studentData,
+        profile: profileRes.data ? {
+          id: profileRes.data.id,
+          full_name: profileRes.data.full_name,
+          phone: profileRes.data.phone,
+          address: profileRes.data.address,
+          avatar_url: profileRes.data.avatar_url,
+          email: userRes.data?.email,
+        } : undefined,
+      };
+
+      setStudent(s);
       setFormData({
-        full_name: data.profile?.full_name || '',
-        phone: data.profile?.phone || '',
-        address: data.profile?.address || '',
-        parent_name: data.parent_name || '',
-        parent_email: data.parent_email || '',
-        parent_phone: data.parent_phone || ''
+        full_name: s.profile?.full_name || '',
+        phone: s.profile?.phone || '',
+        address: s.profile?.address || '',
+        parent_name: s.parent_name || '',
+        parent_email: s.parent_email || '',
+        parent_phone: s.parent_phone || ''
       });
+    } catch (err) {
+      console.error('Error loading profile:', err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -95,6 +116,10 @@ export function StudentProfilePage() {
     return <div className="flex items-center justify-center h-64">Loading...</div>;
   }
 
+  if (!student) {
+    return <div className="text-center py-8 text-muted-foreground">Profile not found</div>;
+  }
+
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div>
@@ -107,14 +132,14 @@ export function StudentProfilePage() {
           <CardHeader>
             <div className="flex items-center gap-4">
               <Avatar className="h-20 w-20">
-                <AvatarImage src={student?.profile?.avatar_url} />
+                <AvatarImage src={student.profile?.avatar_url} />
                 <AvatarFallback className="text-2xl">
                   {formData.full_name?.[0]?.toUpperCase() || 'S'}
                 </AvatarFallback>
               </Avatar>
               <div>
                 <CardTitle>Personal Information</CardTitle>
-                <p className="text-sm text-muted-foreground">Student ID: {student?.student_id}</p>
+                <p className="text-sm text-muted-foreground">Student ID: {student.student_id}</p>
               </div>
             </div>
           </CardHeader>
