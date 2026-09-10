@@ -149,11 +149,13 @@ export function utcToLocal(utcIso: string, timezone: string): {
  * Convert UTC ISO string to local time in a specific timezone for display.
  * Simplified version for components.
  */
-export function formatUtcInTimezone(utcIso: string, timezone: string, options?: {
+export function formatUtcInTimezone(utcIso: string | null | undefined, timezone: string, options?: {
   dateStyle?: 'short' | 'medium' | 'long';
   timeStyle?: 'short' | 'medium';
 }): string {
+  if (!utcIso) return '';
   const date = new Date(utcIso);
+  if (isNaN(date.getTime())) return '';
   return new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
     dateStyle: options?.dateStyle || 'medium',
@@ -164,8 +166,10 @@ export function formatUtcInTimezone(utcIso: string, timezone: string, options?: 
 /**
  * Format just the time portion in a specific timezone.
  */
-export function formatTimeInTimezone(utcIso: string, timezone: string): string {
+export function formatTimeInTimezone(utcIso: string | null | undefined, timezone: string): string {
+  if (!utcIso) return '';
   const date = new Date(utcIso);
+  if (isNaN(date.getTime())) return '';
   return new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
     hour: 'numeric',
@@ -177,8 +181,10 @@ export function formatTimeInTimezone(utcIso: string, timezone: string): string {
 /**
  * Format just the date portion in a specific timezone.
  */
-export function formatDateInTimezone(utcIso: string, timezone: string): string {
+export function formatDateInTimezone(utcIso: string | null | undefined, timezone: string): string {
+  if (!utcIso) return '';
   const date = new Date(utcIso);
+  if (isNaN(date.getTime())) return '';
   return new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
     weekday: 'short',
