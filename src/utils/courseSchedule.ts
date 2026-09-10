@@ -1,6 +1,8 @@
-// Shared course-scheduling utilities.
+// Shared course-scheduling utilities with timezone support.
 // Used by AddCourseModal (initial student) and AssignStudentModal (additional
 // students) so the lesson-generation logic lives in exactly one place.
+
+import { localToUtc } from './timezone';
 
 export const DAY_LABELS = [
   'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
@@ -37,11 +39,16 @@ export interface GeneratedLesson {
   date: string;
   start_time: string;
   end_time: string;
+  start_time_utc: string;
+  end_time_utc: string;
+  timezone: string;
 }
 
 /**
  * Walk forward from startDate, collecting dates that fall on any of the
  * preferred weekday keys, until `totalLessons` dates are produced.
+ * 
+ * The times are generated in the course's timezone and converted to UTC.
  */
 export function generateLessonDates(
   startDate: string,
@@ -49,6 +56,7 @@ export function generateLessonDates(
   preferredDays: string[],
   preferredTime: string,
   durationMinutes: number,
+  timezone: string = 'UTC'
 ): GeneratedLesson[] {
   const results: GeneratedLesson[] = [];
   const dayNums = new Set(
@@ -59,13 +67,24 @@ export function generateLessonDates(
 
   if (dayNums.size === 0 || totalLessons < 1) return results;
 
-  const endTime = addMinutesToTime(preferredTime, durationMinutes);
+  const endTimeLocal = addMinutesToTime(preferredTime, durationMinutes);
   const current = parseLocalDate(startDate);
   let guard = 0;
 
   while (results.length < totalLessons && guard < 2000) {
     if (dayNums.has(current.getDay())) {
-      results.push({ date: toDateString(current), start_time: preferredTime, end_time: endTime });
+      const dateStr = toDateString(current);
+      const startUtc = localToUtc(dateStr, preferredTime, timezone);
+      const endUtc = localToUtc(dateStr, endTimeLocal, timezone);
+      
+      results.push({
+        date: dateStr,
+        start_time: preferredTime,
+        end_time: endTimeLocal,
+        start_time_utc: startUtc,
+        end_time_utc: endUtc,
+        timezone,
+      });
     }
     current.setDate(current.getDate() + 1);
     guard++;
@@ -90,12 +109,16 @@ export interface BuildLessonRowsParams {
   meetingUrl?: string | null;
   /** Amount the teacher earns per lesson, stamped onto each lesson. */
   teacherRate?: number | null;
+  /** Course timezone (student's timezone for this course). */
+  courseTimezone: string;
 }
 
 /**
  * Build ready-to-insert `lessons` rows for one student in a course.
  * Each row carries course_id + student_id + teacher_id so it appears on the
  * management course page and on the student's and teacher's dashboards.
+ * 
+ * Lessons are stored with both local times (in course timezone) and UTC times.
  */
 export function buildCourseLessonRows(params: BuildLessonRowsParams): Record<string, any>[] {
   const dates = generateLessonDates(
@@ -104,6 +127,7 @@ export function buildCourseLessonRows(params: BuildLessonRowsParams): Record<str
     params.preferredDays,
     params.preferredTime,
     params.durationMinutes,
+    params.courseTimezone
   );
 
   const startNumber = params.startNumber ?? 1;
@@ -117,6 +141,9 @@ export function buildCourseLessonRows(params: BuildLessonRowsParams): Record<str
     scheduled_date: d.date,
     start_time: d.start_time,
     end_time: d.end_time,
+    start_time_utc: d.start_time_utc,
+    end_time_utc: d.end_time_utc,
+    timezone: d.timezone,
     duration_minutes: params.durationMinutes,
     meeting_platform: 'zoom',
     meeting_url: params.meetingUrl ?? null,

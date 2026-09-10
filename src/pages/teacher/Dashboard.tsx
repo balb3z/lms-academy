@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Lesson } from '@/types';
 import { formatTime } from '@/utils/format';
+import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
 import { Play, FileText, Video } from 'lucide-react';
 import { toast } from 'react-toastify';
 
@@ -79,13 +80,14 @@ export function TeacherDashboard() {
     const teacherId = user?.id;
 
     try {
-      // Teacher's own record (for the personal Zoom link)
+      // Teacher's own record (for the personal Zoom link and timezone)
       const { data: teacherRow } = await supabase
         .from('teachers')
-        .select('zoom_link')
+        .select('zoom_link, timezone')
         .eq('id', teacherId)
         .single();
       setZoomLink(teacherRow?.zoom_link || null);
+      const tz = teacherRow?.timezone || 'UTC';
 
       // Today's lessons — driven directly by teacher_id so ALL of the teacher's
       // lessons appear (course-generated and manually scheduled alike).
@@ -97,7 +99,21 @@ export function TeacherDashboard() {
         .order('start_time');
 
       if (todayError) console.error('Error fetching today lessons:', todayError);
-      const todayEnriched = await attachRelations(todayRows || []);
+      let todayEnriched = await attachRelations(todayRows || []);
+      
+      // Convert lesson times to teacher's timezone
+      todayEnriched = todayEnriched.map(lesson => {
+        if (lesson.start_time_utc) {
+          return {
+            ...lesson,
+            start_time: formatTimeInTimezone(lesson.start_time_utc, tz),
+            end_time: formatTimeInTimezone(lesson.end_time_utc, tz),
+            scheduled_date: formatDateInTimezone(lesson.start_time_utc, tz),
+          };
+        }
+        return lesson;
+      });
+      
       setTodayLessons(todayEnriched);
 
       // Pending reports: completed lessons for this teacher that have no report.

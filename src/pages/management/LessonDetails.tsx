@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/Button';
 import { supabase } from '@/lib/supabase/client';
 import { Lesson, LessonReport } from '@/types';
 import { formatDate, formatTime } from '@/utils/format';
-import { ArrowLeft, Calendar, Clock, Video, BookOpen, ClipboardList, Award } from 'lucide-react';
+import { formatTimeInTimezone, formatDateInTimezone, getTimezoneOffsetLabel } from '@/utils/timezone';
+import { ArrowLeft, Calendar, Clock, Video, BookOpen, ClipboardList, Award, Globe } from 'lucide-react';
 
 const RATING_LABEL: Record<string, string> = {
   excellent: 'Excellent',
@@ -24,7 +25,8 @@ export function LessonDetails() {
   const [studentEmail, setStudentEmail] = useState('');
   const [teacherName, setTeacherName] = useState('');
   const [teacherEmail, setTeacherEmail] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [courseTimezone, setCourseTimezone] = useState<string>('UTC');
+  const [teacherTimezone, setTeacherTimezone] = useState<string>('UTC');
 
   useEffect(() => {
     if (id) fetchLesson();
@@ -42,7 +44,7 @@ export function LessonDetails() {
       }
       setLesson(data);
 
-      const [subjectRes, profilesRes, usersRes, reportRes] = await Promise.all([
+      const [subjectRes, profilesRes, usersRes, reportRes, courseRes, teacherRes] = await Promise.all([
         data.subject_id
           ? supabase.from('subjects').select('id, name').eq('id', data.subject_id).single()
           : Promise.resolve({ data: null }),
@@ -54,6 +56,10 @@ export function LessonDetails() {
           .eq('lesson_id', id)
           .order('submitted_at', { ascending: false })
           .limit(1),
+        data.course_id
+          ? supabase.from('courses').select('timezone').eq('id', data.course_id).single()
+          : Promise.resolve({ data: null }),
+        supabase.from('teachers').select('timezone').eq('id', data.teacher_id).single(),
       ]);
 
       const nameById: Record<string, string> = {};
@@ -67,6 +73,8 @@ export function LessonDetails() {
       setTeacherName(nameById[data.teacher_id] || '-');
       setTeacherEmail(emailById[data.teacher_id] || '');
       setReport(((reportRes.data as LessonReport[]) || [])[0] || null);
+      setCourseTimezone(courseRes.data?.timezone || 'UTC');
+      setTeacherTimezone(teacherRes.data?.timezone || 'UTC');
     } catch (err) {
       console.error('Error loading lesson:', err);
     } finally {
@@ -137,6 +145,30 @@ export function LessonDetails() {
                 <Button variant="outline" size="sm" onClick={() => window.open(lesson.meeting_url, '_blank', 'noopener,noreferrer')}>
                   Open Meeting Link
                 </Button>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <Globe className="h-4 w-4 text-muted-foreground" />
+              <span>Course Timezone: {courseTimezone} {getTimezoneOffsetLabel(courseTimezone)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Globe className="h-4 w-4 text-muted-foreground" />
+              <span>Teacher Timezone: {teacherTimezone} {getTimezoneOffsetLabel(teacherTimezone)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <span>Scheduled (Course TZ): {formatDate(lesson.scheduled_date)} at {formatTime(lesson.start_time)} - {formatTime(lesson.end_time)}</span>
+            </div>
+            {lesson.start_time_utc && (
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                <span>Teacher View: {formatDateInTimezone(lesson.start_time_utc, teacherTimezone)} at {formatTimeInTimezone(lesson.start_time_utc, teacherTimezone)} ({teacherTimezone})</span>
+              </div>
+            )}
+            {lesson.start_time_utc && (
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                <span>Student View: {formatDateInTimezone(lesson.start_time_utc, courseTimezone)} at {formatTimeInTimezone(lesson.start_time_utc, courseTimezone)} ({courseTimezone})</span>
               </div>
             )}
           </CardContent>

@@ -3,8 +3,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { supabase } from '@/lib/supabase/client';
 import { toast } from 'react-toastify';
+import { getTimezoneOptions } from '@/utils/timezone';
+import { getTimezoneOptions } from '@/utils/timezone';
 
 interface Props {
   open: boolean;
@@ -20,6 +24,7 @@ interface FormData {
   qualification: string;
   years_of_experience: string;
   zoom_link: string;
+  timezone: string;
   is_active: boolean;
 }
 
@@ -34,6 +39,7 @@ export function EditTeacherModal({ open, onClose, onSuccess, teacherId }: Props)
     qualification: '',
     years_of_experience: '',
     zoom_link: '',
+    timezone: 'UTC',
     is_active: true,
   });
 
@@ -62,6 +68,7 @@ export function EditTeacherModal({ open, onClose, onSuccess, teacherId }: Props)
         qualification: t?.qualification ?? '',
         years_of_experience: t?.years_of_experience != null ? String(t.years_of_experience) : '',
         zoom_link: t?.zoom_link ?? '',
+        timezone: t?.timezone ?? 'UTC',
         is_active: t?.is_active ?? true,
       });
     } catch (err) {
@@ -99,6 +106,7 @@ export function EditTeacherModal({ open, onClose, onSuccess, teacherId }: Props)
           qualification: formData.qualification.trim() || null,
           years_of_experience: formData.years_of_experience ? Number(formData.years_of_experience) : 0,
           zoom_link: formData.zoom_link.trim() || null,
+          timezone: formData.timezone || 'UTC',
           is_active: formData.is_active,
           updated_at: new Date().toISOString(),
         })
@@ -195,6 +203,28 @@ export function EditTeacherModal({ open, onClose, onSuccess, teacherId }: Props)
               />
               <p className="text-xs text-muted-foreground">
                 Used automatically for this teacher's lessons. Updating it changes the link students and the teacher open.
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="edit_timezone">Default Timezone <span className="text-destructive" aria-hidden>*</span></Label>
+              <Select
+                value={formData.timezone}
+                onValueChange={e => setFormData(p => ({ ...p, timezone: e }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select timezone" />
+                </SelectTrigger>
+                <SelectContent>
+                  {getTimezoneOptions().map(opt => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The teacher will see all lessons converted to this timezone.
               </p>
             </div>
 

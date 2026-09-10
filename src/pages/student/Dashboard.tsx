@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Lesson, LessonReport } from '@/types';
 import { formatTime } from '@/utils/format';
+import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
 import { Video, FileText, Bell, Clock } from 'lucide-react';
 
 export function StudentDashboard() {
@@ -33,17 +34,18 @@ export function StudentDashboard() {
     }
   }, [user]);
 
-  // Attach teacher names + subjects to lessons using separate round-trips.
+  // Attach teacher names + subjects + course timezone to lessons using separate round-trips.
   // The old embedded `profile:user_id(...)` join does not exist in the schema
   // (profiles.id == users.id) and made the whole query fail, so no lessons
   // were ever shown. This resolves names without a broken embed.
-  const attachRelations = async (rows: { teacher_id: string; subject_id?: string }[]): Promise<Lesson[]> => {
+  const attachRelations = async (rows: { teacher_id: string; subject_id?: string; course_id?: string }[]): Promise<Lesson[]> => {
     if (!rows || rows.length === 0) return [];
 
     const teacherIds = [...new Set(rows.map(r => r.teacher_id).filter(Boolean))];
     const subjectIds = [...new Set(rows.map(r => r.subject_id).filter(Boolean))];
+    const courseIds = [...new Set(rows.map(r => r.course_id).filter(Boolean))];
 
-    const [teacherProfilesRes, teacherZoomRes, subjectsRes] = await Promise.all([
+    const [teacherProfilesRes, teacherZoomRes, subjectsRes, coursesRes] = await Promise.all([
       teacherIds.length > 0
         ? supabase.from('profiles').select('id, full_name').in('id', teacherIds)
         : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
@@ -53,14 +55,38 @@ export function StudentDashboard() {
       subjectIds.length > 0
         ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
         : Promise.resolve({ data: [] as { id: string; name: string; color: string }[] }),
+      courseIds.length > 0
+        ? supabase.from('courses').select('id, timezone').in('id', courseIds)
+        : Promise.resolve({ data: [] as { id: string; timezone: string }[] }),
     ]);
+
+    const courseTimezoneMap: Record<string, string> = {};
+    (coursesRes.data || []).forEach((c: { id: string; timezone: string }) => {
+      courseTimezoneMap[c.id] = c.timezone || 'UTC';
+    });
 
     return rows.map(r => {
       const tp = (teacherProfilesRes.data || []).find((p: { id: string; full_name: string }) => p.id === r.teacher_id);
       const tz = (teacherZoomRes.data || []).find((t: { id: string; zoom_link: string }) => t.id === r.teacher_id);
       const subj = (subjectsRes.data || []).find((s: { id: string; name: string; color: string }) => s.id === r.subject_id);
+      const courseTz = r.course_id ? courseTimezoneMap[r.course_id] || 'UTC' : 'UTC';
+      
+      // Convert lesson times to course timezone if UTC times are available
+      let displayStartTime = r.start_time;
+      let displayEndTime = r.end_time;
+      let displayDate = r.scheduled_date;
+      
+      if (r.start_time_utc) {
+        displayStartTime = formatTimeInTimezone(r.start_time_utc, courseTz);
+        displayEndTime = formatTimeInTimezone(r.end_time_utc, courseTz);
+        displayDate = formatDateInTimezone(r.start_time_utc, courseTz);
+      }
+      
       return {
         ...r,
+        start_time: displayStartTime,
+        end_time: displayEndTime,
+        scheduled_date: displayDate,
         teacher: {
           id: r.teacher_id,
           zoom_link: tz?.zoom_link || undefined,

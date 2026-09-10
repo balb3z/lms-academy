@@ -4,11 +4,13 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { Textarea } from '@/components/ui/Textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'react-toastify';
-import { CheckCircle, BookOpen } from 'lucide-react';
+import { CheckCircle, BookOpen, Globe } from 'lucide-react';
 import { DAY_LABELS, DAY_KEYS, buildCourseLessonRows } from '@/utils/courseSchedule';
+import { getTimezoneOptions } from '@/utils/timezone';
 
 // ── types ──────────────────────────────────────────────────────────────────────
 
@@ -23,6 +25,7 @@ interface TeacherOption {
   teacher_id: string;
   full_name: string;
   zoom_link?: string | null;
+  timezone?: string;
 }
 
 interface Props {
@@ -44,6 +47,7 @@ interface FormData {
   preferred_days: string[];
   preferred_time: string;
   start_date: string;
+  course_timezone: string;
   payment_type: PaymentType;
   price: string;
   currency: string;
@@ -77,6 +81,7 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
     preferred_days: [],
     preferred_time: '19:00',
     start_date: new Date().toISOString().split('T')[0],
+    course_timezone: 'UTC',
     payment_type: 'monthly',
     price: '',
     currency: 'USD',
@@ -96,7 +101,7 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
     try {
       const [studentsRes, teachersRes] = await Promise.all([
         supabase.from('students').select('id, student_id').eq('is_active', true),
-        supabase.from('teachers').select('id, teacher_id, zoom_link').eq('is_active', true),
+        supabase.from('teachers').select('id, teacher_id, zoom_link, timezone').eq('is_active', true),
       ]);
 
       const sIds = (studentsRes.data || []).map((s: any) => s.id);
@@ -121,7 +126,7 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
       setTeachers(
         (teachersRes.data || []).map((t: any) => {
           const p = (tpRes.data || []).find((x: any) => x.id === t.id);
-          return { id: t.id, teacher_id: t.teacher_id, full_name: p?.full_name || `Teacher (${t.teacher_id})`, zoom_link: t.zoom_link };
+          return { id: t.id, teacher_id: t.teacher_id, full_name: p?.full_name || `Teacher (${t.teacher_id})`, zoom_link: t.zoom_link, timezone: t.timezone };
         }),
       );
     } catch (err) {
@@ -152,6 +157,7 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
     if (!formData.teacher_id) e.teacher_id = 'Please select a teacher.';
     if (!formData.preferred_time) e.preferred_time = 'Please set a lesson time.';
     if (!formData.start_date) e.start_date = 'Please set a start date.';
+    if (!formData.course_timezone) e.course_timezone = 'Please select a course timezone.';
     if (formData.preferred_days.length === 0) e.preferred_days = 'Select at least one day.';
     if (!formData.total_lessons || formData.total_lessons < 1) e.total_lessons = 'Must be at least 1.';
     if (!formData.lesson_duration_minutes || formData.lesson_duration_minutes < 15)
@@ -176,6 +182,7 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
         preferred_days: formData.preferred_days,
         preferred_time: formData.preferred_time,
         start_date: formData.start_date,
+        timezone: formData.course_timezone,
         currency: formData.currency.trim().toUpperCase() || 'USD',
         payment_type: formData.payment_type,
         status: 'active',
@@ -230,6 +237,7 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
         createdBy: user?.id,
         meetingUrl: teacherZoom,
         teacherRate: teacherRateNum,
+        courseTimezone: formData.course_timezone,
       });
 
       for (let i = 0; i < lessonRows.length; i += 50) {
@@ -292,6 +300,8 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
     per_hour: 'Price per Hour',
     per_lesson: 'Price per Lesson',
   };
+
+  const selectedTeacher = teachers.find(t => t.id === formData.teacher_id);
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -466,6 +476,42 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
                     aria-invalid={!!errors.start_date}
                   />
                   {errors.start_date && <p className="text-xs text-destructive">{errors.start_date}</p>}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="course_timezone">
+                      Student / Course Timezone <span className="text-destructive" aria-hidden>*</span>
+                    </Label>
+                    <Select
+                      value={formData.course_timezone}
+                      onValueChange={e => { setFormData(p => ({ ...p, course_timezone: e })); clearErr('course_timezone'); }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select timezone" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getTimezoneOptions().map(opt => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {errors.course_timezone && <p className="text-xs text-destructive">{errors.course_timezone}</p>}
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="teacher_timezone_display">Teacher Timezone</Label>
+                    <div className="flex items-center gap-2">
+                      <Globe className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">
+                        {selectedTeacher?.timezone ? getTimezoneOptions().find(o => o.value === selectedTeacher.timezone)?.label || selectedTeacher.timezone : 'Not set'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      The teacher will see lessons converted to their timezone.
+                    </p>
+                  </div>
                 </div>
               </section>
 

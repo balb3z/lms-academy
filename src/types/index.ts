@@ -42,6 +42,7 @@ export interface Teacher {
   qualification?: string;
   years_of_experience?: number;
   zoom_link?: string;
+  timezone?: string;
   is_active: boolean;
   profile?: Profile;
   user?: User;
@@ -71,6 +72,7 @@ export interface Course {
   payment_type: PaymentType;
   status: CourseStatus;
   payment_status: PaymentStatus;
+  timezone?: string;
   notes?: string;
   created_by?: string;
   created_at: string;
@@ -95,6 +97,9 @@ export interface Lesson {
   scheduled_date: string;
   start_time: string;
   end_time: string;
+  start_time_utc?: string;
+  end_time_utc?: string;
+  timezone?: string;
   duration_minutes: number;
   meeting_platform: string;
   meeting_url?: string;

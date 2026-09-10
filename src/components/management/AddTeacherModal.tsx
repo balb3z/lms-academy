@@ -3,9 +3,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { supabase, provisioningClient } from '@/lib/supabase/client';
 import { toast } from 'react-toastify';
 import { Eye, EyeOff, Copy, CheckCircle } from 'lucide-react';
+import { getTimezoneOptions } from '@/utils/timezone';
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -43,6 +45,7 @@ interface FormData {
   qualification: string;
   years_of_experience: string;
   zoom_link: string;
+  timezone: string;
 }
 
 type FormErrors = Partial<Record<keyof FormData, string>>;
@@ -67,6 +70,7 @@ export function AddTeacherModal({ open, onClose, onSuccess }: Props) {
     qualification: '',
     years_of_experience: '',
     zoom_link: '',
+    timezone: 'UTC',
   });
 
   const [formData, setFormData] = useState<FormData>(blankForm);
@@ -84,6 +88,7 @@ export function AddTeacherModal({ open, onClose, onSuccess }: Props) {
     if (!formData.password || formData.password.length < 8) {
       next.password = 'Password must be at least 8 characters.';
     }
+    if (!formData.timezone) next.timezone = 'Please select a timezone.';
     if (formData.years_of_experience && isNaN(Number(formData.years_of_experience))) {
       next.years_of_experience = 'Must be a number.';
     }
@@ -149,6 +154,7 @@ export function AddTeacherModal({ open, onClose, onSuccess }: Props) {
         teacherRow.years_of_experience = Number(formData.years_of_experience);
       }
       if (formData.zoom_link) teacherRow.zoom_link = formData.zoom_link.trim();
+      if (formData.timezone) teacherRow.timezone = formData.timezone;
 
       const { error: teacherError } = await supabase.from('teachers').insert(teacherRow);
       if (teacherError) throw new Error(`Teacher record: ${teacherError.message}`);
@@ -304,6 +310,27 @@ export function AddTeacherModal({ open, onClose, onSuccess }: Props) {
                   <Field id="years_of_experience" label="Years of Experience" type="number" />
                 </div>
                 <Field id="zoom_link" label="Personal Zoom Meeting Link" type="url" />
+                <div className="space-y-1">
+                  <Label htmlFor="timezone">Default Timezone <span className="text-destructive" aria-hidden>*</span></Label>
+                  <Select
+                    value={formData.timezone}
+                    onValueChange={e => { setFormData(p => ({ ...p, timezone: e })); }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select timezone" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getTimezoneOptions().map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    The teacher will see all lessons converted to this timezone.
+                  </p>
+                </div>
               </section>
 
               <DialogFooter>

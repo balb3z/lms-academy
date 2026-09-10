@@ -10,6 +10,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { Lesson } from '@/types';
 import { Search, Eye } from 'lucide-react';
 import { formatDate, formatTime } from '@/utils/format';
+import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
 
 export function StudentLessons() {
   const { user } = useAuth();
@@ -29,7 +30,7 @@ export function StudentLessons() {
     setLoading(true);
 
     try {
-      // Fetch the student's lessons, then resolve teacher names + subjects via
+      // Fetch the student's lessons, then resolve teacher names + subjects + course timezone via
       // separate round-trips. (Previously the broken profile:user_id embed made
       // the whole query fail, so no lessons were listed.)
       const { data: rows, error } = await supabase
@@ -49,21 +50,46 @@ export function StudentLessons() {
       const lessonRows = rows || [];
       const teacherIds = [...new Set(lessonRows.map((l: any) => l.teacher_id).filter(Boolean))];
       const subjectIds = [...new Set(lessonRows.map((l: any) => l.subject_id).filter(Boolean))];
+      const courseIds = [...new Set(lessonRows.map((l: any) => l.course_id).filter(Boolean))];
 
-      const [profilesRes, subjectsRes] = await Promise.all([
+      const [profilesRes, subjectsRes, coursesRes] = await Promise.all([
         teacherIds.length > 0
           ? supabase.from('profiles').select('id, full_name').in('id', teacherIds)
           : Promise.resolve({ data: [] as any[] }),
         subjectIds.length > 0
           ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
           : Promise.resolve({ data: [] as any[] }),
+        courseIds.length > 0
+          ? supabase.from('courses').select('id, timezone').in('id', courseIds)
+          : Promise.resolve({ data: [] as any[] }),
       ]);
+
+      const courseTimezoneMap: Record<string, string> = {};
+      (coursesRes.data || []).forEach((c: any) => {
+        courseTimezoneMap[c.id] = c.timezone || 'UTC';
+      });
 
       const enriched: Lesson[] = lessonRows.map((l: any) => {
         const tp = (profilesRes.data || []).find((p: any) => p.id === l.teacher_id);
         const subj = (subjectsRes.data || []).find((s: any) => s.id === l.subject_id);
+        const courseTz = l.course_id ? courseTimezoneMap[l.course_id] || 'UTC' : 'UTC';
+        
+        // Convert times to course timezone
+        let displayStartTime = l.start_time;
+        let displayEndTime = l.end_time;
+        let displayDate = l.scheduled_date;
+        
+        if (l.start_time_utc) {
+          displayStartTime = formatTimeInTimezone(l.start_time_utc, courseTz);
+          displayEndTime = formatTimeInTimezone(l.end_time_utc, courseTz);
+          displayDate = formatDateInTimezone(l.start_time_utc, courseTz);
+        }
+        
         return {
           ...l,
+          start_time: displayStartTime,
+          end_time: displayEndTime,
+          scheduled_date: displayDate,
           teacher: { id: l.teacher_id, profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined },
           subject: subj || undefined,
         };

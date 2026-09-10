@@ -10,6 +10,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { Lesson } from '@/types';
 import { Search, Eye, Calendar } from 'lucide-react';
 import { formatDate, formatTime } from '@/utils/format';
+import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
 
 export function TeacherLessons() {
   const { user } = useAuth();
@@ -29,6 +30,14 @@ export function TeacherLessons() {
     setLoading(true);
 
     try {
+      // Get teacher's timezone
+      const { data: teacherRow } = await supabase
+        .from('teachers')
+        .select('timezone')
+        .eq('id', teacherId)
+        .single();
+      const tz = teacherRow?.timezone || 'UTC';
+
       // Query lessons directly by teacher_id so every lesson the teacher owns
       // appears — including course-generated ones. (Previously this filtered
       // through student_teacher_assignments and used a broken profile:user_id
@@ -63,8 +72,23 @@ export function TeacherLessons() {
       const enriched: Lesson[] = lessonRows.map((l: any) => {
         const sp = (profilesRes.data || []).find((p: any) => p.id === l.student_id);
         const subj = (subjectsRes.data || []).find((s: any) => s.id === l.subject_id);
+        
+        // Convert times to teacher's timezone
+        let displayStartTime = l.start_time;
+        let displayEndTime = l.end_time;
+        let displayDate = l.scheduled_date;
+        
+        if (l.start_time_utc) {
+          displayStartTime = formatTimeInTimezone(l.start_time_utc, tz);
+          displayEndTime = formatTimeInTimezone(l.end_time_utc, tz);
+          displayDate = formatDateInTimezone(l.start_time_utc, tz);
+        }
+        
         return {
           ...l,
+          start_time: displayStartTime,
+          end_time: displayEndTime,
+          scheduled_date: displayDate,
           student: { id: l.student_id, profile: sp ? { id: sp.id, full_name: sp.full_name } : undefined },
           subject: subj || undefined,
         };
