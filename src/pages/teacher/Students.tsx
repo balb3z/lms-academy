@@ -22,6 +22,7 @@ export function TeacherStudents() {
 
   const fetchStudents = async () => {
     const teacherId = user?.id;
+    setLoading(true);
 
     const { data: assignments } = await supabase
       .from('student_teacher_assignments')
@@ -29,22 +30,40 @@ export function TeacherStudents() {
       .eq('teacher_id', teacherId)
       .eq('is_active', true);
 
-    const studentIds = assignments?.map(a => a.student_id) || [];
+    const studentIds = [...new Set((assignments || []).map(a => a.student_id))];
 
-    const { data } = await supabase
+    if (studentIds.length === 0) {
+      setStudents([]);
+      setLoading(false);
+      return;
+    }
+
+    const { data: studentRows } = await supabase
       .from('students')
-      .select(`
-        *,
-        profile:user_id (
-          full_name,
-          email,
-          phone
-        )
-      `)
+      .select('*')
       .in('id', studentIds)
       .order('created_at', { ascending: false });
 
-    setStudents(data || []);
+    const ids = (studentRows || []).map((s: any) => s.id);
+    const [profilesRes, usersRes] = await Promise.all([
+      ids.length > 0
+        ? supabase.from('profiles').select('id, full_name, phone').in('id', ids)
+        : Promise.resolve({ data: [] as any[] }),
+      ids.length > 0
+        ? supabase.from('users').select('id, email').in('id', ids)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+
+    const enriched = (studentRows || []).map((s: any) => {
+      const p = (profilesRes.data || []).find((x: any) => x.id === s.id);
+      const u = (usersRes.data || []).find((x: any) => x.id === s.id);
+      return {
+        ...s,
+        profile: p ? { id: p.id, full_name: p.full_name, phone: p.phone, email: u?.email } : undefined,
+      };
+    });
+
+    setStudents(enriched);
     setLoading(false);
   };
 

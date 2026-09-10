@@ -28,6 +28,7 @@ ALTER TABLE public.lessons
 -- A teacher can read their own teacher record; a student can read the record of
 -- a teacher they are assigned to or share a lesson with. (Management already has
 -- full access through the existing "Management full access teachers" policy.)
+DROP POLICY IF EXISTS "Related users view teacher record" ON public.teachers;
 CREATE POLICY "Related users view teacher record"
     ON public.teachers FOR SELECT
     USING (

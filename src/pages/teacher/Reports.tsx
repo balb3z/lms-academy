@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { useNavigate } from 'react-router-dom';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -12,6 +13,7 @@ import { formatDate } from '@/utils/format';
 
 export function TeacherReports() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [reports, setReports] = useState<LessonReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -24,21 +26,35 @@ export function TeacherReports() {
 
   const fetchReports = async () => {
     const teacherId = user?.id;
+    setLoading(true);
 
-    const { data } = await supabase
+    // Reports + lesson in one query; student names resolved separately because
+    // there is no user_id FK to embed through (student_id === profiles.id).
+    const { data: rows, error } = await supabase
       .from('lesson_reports')
-      .select(`
-        *,
-        lesson:lesson_id (*),
-        student:student_id (
-          id,
-          profile:user_id (full_name)
-        )
-      `)
+      .select('*, lesson:lesson_id (*)')
       .eq('teacher_id', teacherId)
       .order('submitted_at', { ascending: false });
 
-    setReports(data || []);
+    if (error) {
+      console.error('Error fetching teacher reports:', error);
+      setReports([]);
+      setLoading(false);
+      return;
+    }
+
+    const list = rows || [];
+    const studentIds = [...new Set(list.map((r: any) => r.student_id).filter(Boolean))];
+    const { data: profiles } = studentIds.length > 0
+      ? await supabase.from('profiles').select('id, full_name').in('id', studentIds)
+      : { data: [] as any[] };
+
+    const enriched = list.map((r: any) => {
+      const p = (profiles || []).find((pr: any) => pr.id === r.student_id);
+      return { ...r, student: { id: r.student_id, profile: p ? { full_name: p.full_name } : undefined } };
+    });
+
+    setReports(enriched);
     setLoading(false);
   };
 
@@ -47,7 +63,7 @@ export function TeacherReports() {
       present: 'success',
       late: 'warning',
       absent: 'destructive',
-      excused: 'info'
+      excused: 'info',
     };
     return variants[status] || 'default';
   };
@@ -108,7 +124,7 @@ export function TeacherReports() {
                       {report.lesson?.scheduled_date ? formatDate(report.lesson.scheduled_date) : '-'}
                     </TableCell>
                     <TableCell className="font-medium">{report.lesson?.title}</TableCell>
-                    <TableCell>{report.student?.profile?.full_name}</TableCell>
+                    <TableCell>{report.student?.profile?.full_name || '-'}</TableCell>
                     <TableCell>
                       <Badge variant={getAttendanceBadge(report.attendance_status)}>
                         {report.attendance_status}
@@ -122,7 +138,12 @@ export function TeacherReports() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate(`/teacher/lessons/${report.lesson_id}`)}
+                        aria-label="View lesson"
+                      >
                         <Eye className="h-4 w-4" />
                       </Button>
                     </TableCell>

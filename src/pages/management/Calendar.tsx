@@ -4,11 +4,13 @@ import { Button } from '@/components/ui/Button';
 import { supabase } from '@/lib/supabase/client';
 import { Lesson } from '@/types';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { AddLessonModal } from '@/components/management/AddLessonModal';
 
 export function Calendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAddLesson, setShowAddLesson] = useState(false);
 
   useEffect(() => {
     fetchLessons();
@@ -17,29 +19,20 @@ export function Calendar() {
   const fetchLessons = async () => {
     const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
     const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-    
+
     const startStr = startOfMonth.toISOString().split('T')[0];
     const endStr = endOfMonth.toISOString().split('T')[0];
 
-    const { data } = await supabase
+    // Calendar only renders lesson title + time, so no profile join is needed.
+    const { data, error } = await supabase
       .from('lessons')
-      .select(`
-        *,
-        student:student_id (
-          id,
-          profile:user_id (full_name)
-        ),
-        teacher:teacher_id (
-          id,
-          profile:user_id (full_name)
-        ),
-        subject:subject_id (*)
-      `)
+      .select('*')
       .gte('scheduled_date', startStr)
       .lte('scheduled_date', endStr)
       .order('scheduled_date')
       .order('start_time');
 
+    if (error) console.error('Error fetching calendar lessons:', error);
     setLessons(data || []);
     setLoading(false);
   };
@@ -92,7 +85,7 @@ export function Calendar() {
           <h1 className="text-3xl font-bold">Calendar</h1>
           <p className="text-muted-foreground">View and manage your schedule</p>
         </div>
-        <Button>
+        <Button onClick={() => setShowAddLesson(true)}>
           <Plus className="h-4 w-4 mr-2" />
           Schedule Lesson
         </Button>
@@ -156,6 +149,12 @@ export function Calendar() {
           </div>
         </CardContent>
       </Card>
+
+      <AddLessonModal
+        open={showAddLesson}
+        onClose={() => setShowAddLesson(false)}
+        onSuccess={() => { setShowAddLesson(false); fetchLessons(); }}
+      />
     </div>
   );
 }

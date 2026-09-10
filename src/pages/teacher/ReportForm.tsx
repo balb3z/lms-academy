@@ -121,6 +121,20 @@ export function TeacherReportForm() {
 
       if (reportError) throw new Error(`Report: ${reportError.message}`);
 
+      // If the lesson has no stamped teacher_rate yet (e.g. it was generated
+      // before rates existed), pull it from the course enrollment so the
+      // teacher's earnings actually update on completion.
+      let teacherRate = lesson.teacher_rate ?? null;
+      if (teacherRate === null && lesson.course_id) {
+        const { data: enrollment } = await supabase
+          .from('course_enrollments')
+          .select('teacher_rate')
+          .eq('course_id', lesson.course_id)
+          .eq('student_id', lesson.student_id)
+          .maybeSingle();
+        if (enrollment?.teacher_rate != null) teacherRate = Number(enrollment.teacher_rate);
+      }
+
       // 2. Complete the lesson — this drives teacher earnings + student progress.
       //    We .select() so a silent RLS no-op is detected instead of ignored.
       const { data: updatedLesson, error: lessonError } = await supabase
@@ -129,6 +143,7 @@ export function TeacherReportForm() {
           status: 'completed',
           attendance_status: formData.attendance_status,
           actual_end_time: new Date().toISOString(),
+          teacher_rate: teacherRate,
         })
         .eq('id', lessonId)
         .select('id');

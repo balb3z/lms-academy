@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { useNavigate } from 'react-router-dom';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { supabase } from '@/lib/supabase/client';
 import { LessonReport } from '@/types';
-import { Search, Eye, Download } from 'lucide-react';
+import { Search, Eye } from 'lucide-react';
 import { formatDate } from '@/utils/format';
 
 export function Reports() {
+  const navigate = useNavigate();
   const [reports, setReports] = useState<LessonReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -19,23 +21,44 @@ export function Reports() {
   }, []);
 
   const fetchReports = async () => {
-    const { data } = await supabase
+    setLoading(true);
+
+    // Report + lesson in one query; student & teacher names resolved separately
+    // (student_id / teacher_id === profiles.id, so there is no embed to join through).
+    const { data: rows, error } = await supabase
       .from('lesson_reports')
-      .select(`
-        *,
-        lesson:lesson_id (*),
-        student:student_id (
-          id,
-          profile:user_id (full_name)
-        ),
-        teacher:teacher_id (
-          id,
-          profile:user_id (full_name)
-        )
-      `)
+      .select('*, lesson:lesson_id (*)')
       .order('submitted_at', { ascending: false });
 
-    setReports(data || []);
+    if (error) {
+      console.error('Error fetching reports:', error);
+      setReports([]);
+      setLoading(false);
+      return;
+    }
+
+    const list = rows || [];
+    const personIds = [
+      ...new Set([
+        ...list.map((r: any) => r.student_id),
+        ...list.map((r: any) => r.teacher_id),
+      ].filter(Boolean)),
+    ];
+
+    const { data: profiles } = personIds.length > 0
+      ? await supabase.from('profiles').select('id, full_name').in('id', personIds)
+      : { data: [] as any[] };
+
+    const nameById: Record<string, string> = {};
+    (profiles || []).forEach((p: any) => { nameById[p.id] = p.full_name; });
+
+    const enriched = list.map((r: any) => ({
+      ...r,
+      student: { id: r.student_id, profile: { full_name: nameById[r.student_id] } },
+      teacher: { id: r.teacher_id, profile: { full_name: nameById[r.teacher_id] } },
+    }));
+
+    setReports(enriched);
     setLoading(false);
   };
 
@@ -44,7 +67,7 @@ export function Reports() {
       present: 'success',
       late: 'warning',
       absent: 'destructive',
-      excused: 'info'
+      excused: 'info',
     };
     return variants[status] || 'default';
   };
@@ -54,7 +77,7 @@ export function Reports() {
       excellent: 'success',
       very_good: 'info',
       good: 'default',
-      needs_improvement: 'warning'
+      needs_improvement: 'warning',
     };
     return variants[rating] || 'default';
   };
@@ -72,10 +95,6 @@ export function Reports() {
           <h1 className="text-3xl font-bold">Reports</h1>
           <p className="text-muted-foreground">View all lesson reports</p>
         </div>
-        <Button variant="outline">
-          <Download className="h-4 w-4 mr-2" />
-          Export
-        </Button>
       </div>
 
       <Card>
@@ -123,8 +142,8 @@ export function Reports() {
                       {report.lesson?.scheduled_date ? formatDate(report.lesson.scheduled_date) : '-'}
                     </TableCell>
                     <TableCell className="font-medium">{report.lesson?.title}</TableCell>
-                    <TableCell>{report.student?.profile?.full_name}</TableCell>
-                    <TableCell>{report.teacher?.profile?.full_name}</TableCell>
+                    <TableCell>{report.student?.profile?.full_name || '-'}</TableCell>
+                    <TableCell>{report.teacher?.profile?.full_name || '-'}</TableCell>
                     <TableCell>
                       <Badge variant={getAttendanceBadge(report.attendance_status)}>
                         {report.attendance_status}
@@ -138,7 +157,12 @@ export function Reports() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate(`/management/lessons/${report.lesson_id}`)}
+                        aria-label="View lesson"
+                      >
                         <Eye className="h-4 w-4" />
                       </Button>
                     </TableCell>

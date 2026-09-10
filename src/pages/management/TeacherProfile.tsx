@@ -28,7 +28,7 @@ export function TeacherProfile() {
         supabase.from('teachers').select('*').eq('id', teacherId).single(),
         supabase.from('profiles').select('full_name, phone, avatar_url').eq('id', teacherId).single(),
         supabase.from('users').select('email').eq('id', teacherId).single(),
-        supabase.from('lessons').select('teacher_rate').eq('teacher_id', teacherId).eq('status', 'completed'),
+        supabase.from('lessons').select('teacher_rate, course_id, student_id').eq('teacher_id', teacherId).eq('status', 'completed'),
       ]);
 
       if (teacherRes.data) {
@@ -38,7 +38,30 @@ export function TeacherProfile() {
 
       const completed = completedRes.data || [];
       setCompletedCount(completed.length);
-      setEarnings(completed.reduce((sum: number, l: any) => sum + (Number(l.teacher_rate) || 0), 0));
+
+      // Earnings with enrollment-rate fallback for lessons missing a stamped rate
+      const missingRate = completed.filter((l: any) => l.teacher_rate == null && l.course_id);
+      const enrollmentRateMap: Record<string, number> = {};
+      if (missingRate.length > 0) {
+        const courseIds = [...new Set(missingRate.map((l: any) => l.course_id))];
+        const { data: enrollments } = await supabase
+          .from('course_enrollments')
+          .select('course_id, student_id, teacher_rate')
+          .in('course_id', courseIds);
+        (enrollments || []).forEach((e: any) => {
+          if (e.teacher_rate != null) {
+            enrollmentRateMap[`${e.course_id}|${e.student_id}`] = Number(e.teacher_rate);
+          }
+        });
+      }
+      setEarnings(
+        completed.reduce((sum: number, l: any) => {
+          const rate = l.teacher_rate != null
+            ? Number(l.teacher_rate)
+            : (enrollmentRateMap[`${l.course_id}|${l.student_id}`] ?? 0);
+          return sum + (rate || 0);
+        }, 0),
+      );
     } catch (err) {
       console.error('Error loading teacher profile:', err);
     } finally {

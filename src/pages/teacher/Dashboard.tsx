@@ -123,10 +123,29 @@ export function TeacherDashboard() {
       setPendingReports(pending);
 
       // Earnings = SUM(teacher_rate) over the teacher's completed lessons.
-      const earnings = (completedRows || []).reduce(
-        (sum: number, l: any) => sum + (Number(l.teacher_rate) || 0),
-        0,
-      );
+      // Fallback: for completed lessons that have no stamped teacher_rate yet,
+      // use the rate from their course enrollment so earnings stay consistent.
+      const completed = completedRows || [];
+      const missingRate = completed.filter((l: any) => l.teacher_rate == null && l.course_id);
+      const enrollmentRateMap: Record<string, number> = {};
+      if (missingRate.length > 0) {
+        const courseIds = [...new Set(missingRate.map((l: any) => l.course_id))];
+        const { data: enrollments } = await supabase
+          .from('course_enrollments')
+          .select('course_id, student_id, teacher_rate')
+          .in('course_id', courseIds);
+        (enrollments || []).forEach((e: any) => {
+          if (e.teacher_rate != null) {
+            enrollmentRateMap[`${e.course_id}|${e.student_id}`] = Number(e.teacher_rate);
+          }
+        });
+      }
+      const earnings = completed.reduce((sum: number, l: any) => {
+        const rate = l.teacher_rate != null
+          ? Number(l.teacher_rate)
+          : (enrollmentRateMap[`${l.course_id}|${l.student_id}`] ?? 0);
+        return sum + (rate || 0);
+      }, 0);
 
       // Stats
       const { count: totalStudents } = await supabase
