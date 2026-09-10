@@ -27,6 +27,7 @@ export function LessonDetails() {
   const [teacherEmail, setTeacherEmail] = useState('');
   const [courseTimezone, setCourseTimezone] = useState<string>('UTC');
   const [teacherTimezone, setTeacherTimezone] = useState<string>('UTC');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (id) fetchLesson();

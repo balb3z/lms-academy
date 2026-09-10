@@ -100,6 +100,21 @@ CREATE POLICY "Teacher update own lessons" ON public.lessons
   USING (teacher_id = auth.uid())
   WITH CHECK (teacher_id = auth.uid());
 
+-- Lessons: teacher can view their own lessons
+CREATE POLICY "Teacher view own lessons" ON public.lessons
+  FOR SELECT
+  USING (teacher_id = auth.uid());
+
+-- Lessons: student can view their own lessons
+CREATE POLICY "Student view own lessons" ON public.lessons
+  FOR SELECT
+  USING (student_id = auth.uid());
+
+-- Lessons: management can view all lessons
+CREATE POLICY "Management full access lessons" ON public.lessons
+  FOR ALL
+  USING (public.is_management_user(auth.uid()));
+
 -- Lesson reports: teacher can insert/update their own
 CREATE POLICY "Teacher insert own reports" ON public.lesson_reports
   FOR INSERT
@@ -109,6 +124,21 @@ CREATE POLICY "Teacher update own reports" ON public.lesson_reports
   FOR UPDATE
   USING (teacher_id = auth.uid())
   WITH CHECK (teacher_id = auth.uid());
+
+-- Lesson reports: teacher can view their own reports
+CREATE POLICY "Teacher view own reports" ON public.lesson_reports
+  FOR SELECT
+  USING (teacher_id = auth.uid());
+
+-- Lesson reports: student can view their own reports (visible ones)
+CREATE POLICY "Student view own reports" ON public.lesson_reports
+  FOR SELECT
+  USING (student_id = auth.uid() AND is_visible_to_student = true);
+
+-- Lesson reports: management can view all
+CREATE POLICY "Management full access lesson_reports" ON public.lesson_reports
+  FOR ALL
+  USING (public.is_management_user(auth.uid()));
 
 -- Attendance: teacher can insert/update their own
 CREATE POLICY "Teacher insert own attendance" ON public.attendance
@@ -120,11 +150,58 @@ CREATE POLICY "Teacher update own attendance" ON public.attendance
   USING (teacher_id = auth.uid())
   WITH CHECK (teacher_id = auth.uid());
 
+-- Attendance: teacher can view their own
+CREATE POLICY "Teacher view own attendance" ON public.attendance
+  FOR SELECT
+  USING (teacher_id = auth.uid());
+
+-- Attendance: student can view their own
+CREATE POLICY "Student view own attendance" ON public.attendance
+  FOR SELECT
+  USING (student_id = auth.uid());
+
+-- Attendance: management can view all
+CREATE POLICY "Management full access attendance" ON public.attendance
+  FOR ALL
+  USING (public.is_management_user(auth.uid()));
+
 -- Notifications: staff can insert
 CREATE POLICY "Staff insert notifications" ON public.notifications
   FOR INSERT
   WITH CHECK (
     public.get_user_role(auth.uid()) IN ('teacher', 'management')
   );
+
+-- Courses: teacher can view their courses
+CREATE POLICY "Teacher view own courses" ON public.courses
+  FOR SELECT
+  USING (teacher_id = auth.uid());
+
+-- Courses: student can view their courses
+CREATE POLICY "Student view own courses" ON public.courses
+  FOR SELECT
+  USING (student_id = auth.uid());
+
+-- Courses: management full access
+CREATE POLICY "Management full access courses" ON public.courses
+  FOR ALL
+  USING (public.is_management_user(auth.uid()));
+
+-- Course enrollments: teacher can view enrollments for their courses
+CREATE POLICY "Teacher view course enrollments" ON public.course_enrollments
+  FOR SELECT
+  USING (
+    course_id IN (SELECT id FROM public.courses WHERE teacher_id = auth.uid())
+  );
+
+-- Course enrollments: student can view their enrollments
+CREATE POLICY "Student view own enrollments" ON public.course_enrollments
+  FOR SELECT
+  USING (student_id = auth.uid());
+
+-- Course enrollments: management full access
+CREATE POLICY "Management full access course_enrollments" ON public.course_enrollments
+  FOR ALL
+  USING (public.is_management_user(auth.uid()));
 
 SELECT 'RLS policies fixed. No more infinite recursion.' as status;
