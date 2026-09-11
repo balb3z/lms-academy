@@ -96,6 +96,7 @@ function LessonReportCard({ report }: { report: LessonReport }) {
                 </div>
               )}
             </div>
+          )}
           </CardContent>
         </Card>
       </>
