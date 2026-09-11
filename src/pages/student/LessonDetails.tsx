@@ -88,14 +88,14 @@ export function StudentLessonDetails() {
 
   // Student sees lesson in the course timezone (their timezone for this course)
   const courseTz = courseTimezone;
-  const displayStartTime = lesson.start_time_utc 
-    ? formatTimeInTimezone(lesson.start_time_utc, courseTz) 
+  const displayStartTime = lesson.start_time_utc && lesson.end_time_utc && courseTz
+    ? formatTimeInTimezone(lesson.start_time_utc, courseTz)
     : lesson.start_time;
-  const displayEndTime = lesson.end_time_utc 
-    ? formatTimeInTimezone(lesson.end_time_utc, courseTz) 
+  const displayEndTime = lesson.start_time_utc && lesson.end_time_utc && courseTz
+    ? formatTimeInTimezone(lesson.end_time_utc, courseTz)
     : lesson.end_time;
-  const displayDate = lesson.start_time_utc 
-    ? formatDateInTimezone(lesson.start_time_utc, courseTz) 
+  const displayDate = lesson.start_time_utc && courseTz
+    ? formatDateInTimezone(lesson.start_time_utc, courseTz)
     : lesson.scheduled_date;
 
   const link = lesson.teacher?.zoom_link || lesson.meeting_url || null;

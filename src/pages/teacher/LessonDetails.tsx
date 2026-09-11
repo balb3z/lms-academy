@@ -139,14 +139,14 @@ export function TeacherLessonDetails() {
   const teacherTz = teacherTimezone;
   const courseTz = courseTimezone;
   
-  const displayStartTime = lesson.start_time_utc 
-    ? formatTimeInTimezone(lesson.start_time_utc, teacherTz) 
+  const displayStartTime = lesson.start_time_utc && lesson.end_time_utc && teacherTz
+    ? formatTimeInTimezone(lesson.start_time_utc, teacherTz)
     : lesson.start_time;
-  const displayEndTime = lesson.end_time_utc 
-    ? formatTimeInTimezone(lesson.end_time_utc, teacherTz) 
+  const displayEndTime = lesson.start_time_utc && lesson.end_time_utc && teacherTz
+    ? formatTimeInTimezone(lesson.end_time_utc, teacherTz)
     : lesson.end_time;
-  const displayDate = lesson.start_time_utc 
-    ? formatDateInTimezone(lesson.start_time_utc, teacherTz) 
+  const displayDate = lesson.start_time_utc && teacherTz
+    ? formatDateInTimezone(lesson.start_time_utc, teacherTz)
     : lesson.scheduled_date;
 
   return (

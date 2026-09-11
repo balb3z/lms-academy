@@ -72,10 +72,14 @@ export function StudentDashboard() {
       let displayEndTime = r.end_time;
       let displayDate = r.scheduled_date;
       
-      if (r.start_time_utc) {
-        displayStartTime = formatTimeInTimezone(r.start_time_utc, courseTz);
-        displayEndTime = formatTimeInTimezone(r.end_time_utc, courseTz);
-        displayDate = formatDateInTimezone(r.start_time_utc, courseTz);
+      if (r.start_time_utc && r.end_time_utc && courseTz) {
+        try {
+          displayStartTime = formatTimeInTimezone(r.start_time_utc, courseTz);
+          displayEndTime = formatTimeInTimezone(r.end_time_utc, courseTz);
+          displayDate = formatDateInTimezone(r.start_time_utc, courseTz);
+        } catch (e) {
+          console.warn('Failed to convert timezone for lesson:', r.id, e);
+        }
       }
       
       return {
