@@ -9,16 +9,16 @@ import { formatDate, formatTime } from '@/utils/format';
 import { formatTimeInTimezone, formatDateInTimezone, getTimezoneOffsetLabel } from '@/utils/timezone';
 import { ArrowLeft, Calendar, Clock, Video, BookOpen, ClipboardList, Award, Globe } from 'lucide-react';
 
-const RATING_LABEL: Record<string, string> = {
+export const RATING_LABEL: Record<string, string> = {
   excellent: 'Excellent',
   very_good: 'Very Good',
   good: 'Good',
   needs_improvement: 'Needs Improvement',
 };
 
-type BadgeVariant = 'success' | 'info' | 'warning' | 'destructive' | 'secondary' | 'default';
+export type BadgeVariant = 'success' | 'info' | 'warning' | 'destructive' | 'secondary' | 'default';
 
-const RATING_VARIANT: Record<string, BadgeVariant> = {
+export const RATING_VARIANT: Record<string, BadgeVariant> = {
   excellent: 'success',
   very_good: 'success',
   good: 'info',
