@@ -22,19 +22,46 @@ DROP POLICY IF EXISTS "Student read teacher profiles" ON public.profiles;
 
 -- 3. Drop ALL existing policies on lessons
 DROP POLICY IF EXISTS "Teacher update own lessons" ON public.lessons;
+DROP POLICY IF EXISTS "Teacher view own lessons" ON public.lessons;
+DROP POLICY IF EXISTS "Teacher create lessons" ON public.lessons;
+DROP POLICY IF EXISTS "Student view own lessons" ON public.lessons;
+DROP POLICY IF EXISTS "Management full access lessons" ON public.lessons;
 
 -- 4. Drop ALL existing policies on lesson_reports
 DROP POLICY IF EXISTS "Teacher insert own reports" ON public.lesson_reports;
 DROP POLICY IF EXISTS "Teacher update own reports" ON public.lesson_reports;
+DROP POLICY IF EXISTS "Teacher view own reports" ON public.lesson_reports;
+DROP POLICY IF EXISTS "Student view own reports" ON public.lesson_reports;
+DROP POLICY IF EXISTS "Management full access lesson_reports" ON public.lesson_reports;
 
 -- 5. Drop ALL existing policies on attendance
 DROP POLICY IF EXISTS "Teacher insert own attendance" ON public.attendance;
 DROP POLICY IF EXISTS "Teacher update own attendance" ON public.attendance;
+DROP POLICY IF EXISTS "Teacher view own attendance" ON public.attendance;
+DROP POLICY IF EXISTS "Student view own attendance" ON public.attendance;
+DROP POLICY IF EXISTS "Management full access attendance" ON public.attendance;
 
 -- 6. Drop ALL existing policies on notifications
 DROP POLICY IF EXISTS "Staff insert notifications" ON public.notifications;
 
--- 7. Create/Update SECURITY DEFINER helper functions (avoids recursion)
+-- 7. Drop ALL existing policies on courses
+DROP POLICY IF EXISTS "Teacher view own courses" ON public.courses;
+DROP POLICY IF EXISTS "Student view own courses" ON public.courses;
+DROP POLICY IF EXISTS "Management full access courses" ON public.courses;
+
+-- 8. Drop ALL existing policies on course_enrollments
+DROP POLICY IF EXISTS "Teacher view course enrollments" ON public.course_enrollments;
+DROP POLICY IF EXISTS "Teacher create course enrollments" ON public.course_enrollments;
+DROP POLICY IF EXISTS "Student view own enrollments" ON public.course_enrollments;
+DROP POLICY IF EXISTS "Management full access course_enrollments" ON public.course_enrollments;
+
+-- 9. Drop ALL existing policies on student_teacher_assignments
+DROP POLICY IF EXISTS "Teacher view student assignments" ON public.student_teacher_assignments;
+DROP POLICY IF EXISTS "Teacher create student assignments" ON public.student_teacher_assignments;
+DROP POLICY IF EXISTS "Student view teacher assignments" ON public.student_teacher_assignments;
+DROP POLICY IF EXISTS "Management full access student_teacher_assignments" ON public.student_teacher_assignments;
+
+-- 10. Create/Update SECURITY DEFINER helper functions (avoids recursion)
 CREATE OR REPLACE FUNCTION public.is_management_user(user_id uuid)
 RETURNS boolean
 LANGUAGE sql
@@ -53,7 +80,7 @@ AS $$
   SELECT role FROM public.users WHERE id = user_id;
 $$;
 
--- 8. Recreate policies using helper functions (no recursion)
+-- 11. Recreate policies using helper functions (no recursion)
 
 -- Users table policies
 CREATE POLICY "Management full access users" ON public.users
@@ -210,11 +237,6 @@ CREATE POLICY "Teacher create course enrollments" ON public.course_enrollments
 CREATE POLICY "Student view own enrollments" ON public.course_enrollments
   FOR SELECT
   USING (student_id = auth.uid());
-
--- Course enrollments: management full access
-CREATE POLICY "Management full access course_enrollments" ON public.course_enrollments
-  FOR ALL
-  USING (public.is_management_user(auth.uid()));
 
 -- Course enrollments: management full access
 CREATE POLICY "Management full access course_enrollments" ON public.course_enrollments

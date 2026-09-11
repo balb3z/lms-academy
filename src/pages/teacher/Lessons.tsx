@@ -42,18 +42,6 @@ export function TeacherLessons() {
     setLoading(true);
 
     try {
-      // Get teacher's courses with timezones
-      const { data: courses } = await supabase
-        .from('courses')
-        .select('id, timezone')
-        .eq('teacher_id', teacherId)
-        .eq('status', 'active');
-
-      const courseTimezoneMap: Record<string, string> = {};
-      (courses || []).forEach((c: any) => {
-        if (c.timezone) courseTimezoneMap[c.id] = c.timezone;
-      });
-
       // Query lessons directly by teacher_id so every lesson the teacher owns
       // appears — including course-generated ones.
       const { data: rows, error } = await supabase
