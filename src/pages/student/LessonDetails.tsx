@@ -280,12 +280,3 @@ export function StudentLessonDetails() {
     </div>
   );
 }
-  switch (status) {
-    case 'scheduled': return 'info';
-    case 'live': return 'warning';
-    case 'completed': return 'success';
-    case 'cancelled': return 'destructive';
-    case 'absent': return 'secondary';
-    default: return 'default';
-  }
-};
