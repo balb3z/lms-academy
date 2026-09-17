@@ -60,6 +60,16 @@ CREATE TABLE public.subjects (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Enable RLS on subjects table
+ALTER TABLE public.subjects ENABLE ROW LEVEL SECURITY;
+
+-- Subject policies: all authenticated users can read, management can write
+CREATE POLICY "Subjects readable by all authenticated" ON public.subjects
+  FOR SELECT USING (auth.role() = 'authenticated');
+
+CREATE POLICY "Subjects writable by management" ON public.subjects
+  FOR ALL USING (auth.uid() IN (SELECT id FROM public.users WHERE role = 'management'));
+
 -- 6. STUDENT_TEACHER_ASSIGNMENTS TABLE
 CREATE TABLE public.student_teacher_assignments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
