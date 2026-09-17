@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { supabase } from '@/lib/supabase/client';
 import { Lesson, LessonReport } from '@/types';
 import { formatDate, formatTime } from '@/utils/format';
-import { formatTimeInTimezone, formatDateInTimezone, getTimezoneOffsetLabel } from '@/utils/timezone';
+import { getTimezoneOffsetLabel } from '@/utils/timezone';
 import { ArrowLeft, Calendar, Clock, Video, BookOpen, ClipboardList, Award, Globe } from 'lucide-react';
 
 export const RATING_LABEL: Record<string, string> = {
@@ -112,7 +112,6 @@ export function LessonDetails() {
   const [studentEmail, setStudentEmail] = useState('');
   const [teacherName, setTeacherName] = useState('');
   const [teacherEmail, setTeacherEmail] = useState('');
-  const [courseTimezone, setCourseTimezone] = useState<string>('UTC');
   const [teacherTimezone, setTeacherTimezone] = useState<string>('UTC');
   const [loading, setLoading] = useState(true);
 
@@ -161,7 +160,6 @@ export function LessonDetails() {
       setTeacherName(nameById[data.teacher_id] || '-');
       setTeacherEmail(emailById[data.teacher_id] || '');
       setReport(((reportRes.data as LessonReport[]) || [])[0] || null);
-      setCourseTimezone(courseRes.data?.timezone || 'UTC');
       setTeacherTimezone(teacherRes.data?.timezone || 'UTC');
     } catch (err) {
       console.error('Error loading lesson:', err);
@@ -301,15 +299,4 @@ export function LessonDetails() {
       </div>
     </div>
   );
-}
-
-const getStatusVariant = (status: string) => {
-  switch (status) {
-    case 'scheduled': return 'info';
-    case 'live': return 'warning';
-    case 'completed': return 'success';
-    case 'cancelled': return 'destructive';
-    case 'absent': return 'secondary';
-    default: return 'default';
-  }
 }

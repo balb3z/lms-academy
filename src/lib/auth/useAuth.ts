@@ -14,7 +14,7 @@ export function useAuth() {
   useEffect(() => {
     console.log('🔐 useAuth: Setting up auth listener...');
     
-    let subscription: any = null;
+    let subscription: { unsubscribe: () => void } | null = null;
 
     const setupAuthListener = async () => {
       try {
@@ -83,33 +83,33 @@ export function useAuth() {
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    try {
-      console.log('🔐 Signing in:', email);
-      const { user, role } = await auth.signIn(email, password);
-      console.log('✅ Sign in successful:', email, 'Role:', role);
-      setUser(user);
-      setRole(role);
-      
-      switch(role) {
-        case 'management':
-          navigate('/management');
-          break;
-        case 'teacher':
-          navigate('/teacher');
-          break;
-        case 'student':
-          navigate('/student');
-          break;
-        default:
-          navigate('/');
-      }
-      toast.success('Welcome back!');
-    } catch (error: any) {
-      console.error('❌ Sign in error:', error);
-      toast.error(error.message || 'Login failed');
-      throw error;
-    }
-  };
+try {
+              console.log('🔐 Signing in:', email);
+              const { user, role } = await auth.signIn(email, password);
+              console.log('✅ Sign in successful:', email, 'Role:', role);
+              setUser(user);
+              setRole(role);
+              
+              switch(role) {
+                case 'management':
+                  navigate('/management');
+                  break;
+                case 'teacher':
+                  navigate('/teacher');
+                  break;
+                case 'student':
+                  navigate('/student');
+                  break;
+                default:
+                  navigate('/');
+              }
+              toast.success('Welcome back!');
+            } catch (error) {
+              console.error('❌ Sign in error:', error);
+              toast.error(error instanceof Error ? error.message : 'Login failed');
+              throw error;
+            }
+          };
 
   const signOut = async () => {
     try {
@@ -118,7 +118,7 @@ export function useAuth() {
       setRole(null);
       navigate('/auth/login');
       toast.info('Logged out successfully');
-    } catch (error: any) {
+    } catch (error) {
       console.error('❌ Sign out error:', error);
       toast.error(error.message || 'Logout failed');
     }

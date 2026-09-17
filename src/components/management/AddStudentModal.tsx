@@ -157,7 +157,7 @@ export function AddStudentModal({ open, onClose, onSuccess }: Props) {
       setStep('credentials');
       onSuccess();
       toast.success('Student account created successfully!');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error creating student:', err);
       toast.error(err.message || 'Failed to create student account.');
     } finally {

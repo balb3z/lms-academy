@@ -26,7 +26,7 @@ export function ResetPassword() {
       await auth.updatePassword(password);
       toast.success('Password updated successfully');
       navigate('/auth/login');
-    } catch (error: any) {
+    } catch (error) {
       toast.error(error.message || 'Failed to update password');
     } finally {
       setLoading(false);

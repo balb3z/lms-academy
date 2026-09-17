@@ -6,9 +6,8 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { supabase } from '@/lib/supabase/client';
 import { formatTime } from '@/utils/format';
-import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
 import { Lesson } from '@/types';
-import { Calendar, Plus, Users, UserCog, BookOpen, GraduationCap } from 'lucide-react';
+import { Plus, Users, UserCog, BookOpen, GraduationCap } from 'lucide-react';
 import { AddLessonModal } from '@/components/management/AddLessonModal';
 import { AddStudentModal } from '@/components/management/AddStudentModal';
 import { AddTeacherModal } from '@/components/management/AddTeacherModal';
@@ -31,11 +30,11 @@ export function ManagementDashboard() {
   const [showAddTeacher, setShowAddTeacher] = useState(false);
   const [showAddCourse, setShowAddCourse] = useState(false);
 
-  useEffect(() => {
+useEffect(() => {
     fetchDashboardData();
   }, []);
 
-// Helper to attach student/teacher names + subjects to lessons
+  // Helper to attach student/teacher names + subjects to lessons
   async function attachRelations(rows: { student_id: string; teacher_id: string; subject_id?: string; start_time_utc?: string }[]): Promise<Lesson[]> {
     if (!rows || rows.length === 0) return [];
 
@@ -48,13 +47,13 @@ export function ManagementDashboard() {
       supabase.from('profiles').select('id, full_name').in('id', teacherIds),
       subjectIds.length > 0
         ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
-        : Promise.resolve({ data: [] as any[] }),
+        : Promise.resolve({ data: [] as { id: string; name: string; color: string }[] }),
     ]);
 
     return rows.map(l => {
-      const sp = (spRes.data || []).find((p: any) => p.id === l.student_id);
-      const tp = (tpRes.data || []).find((p: any) => p.id === l.teacher_id);
-      const subj = (subjectsRes.data || []).find((s: any) => s.id === l.subject_id);
+      const sp = (spRes.data || []).find((p) => p.id === l.student_id);
+      const tp = (tpRes.data || []).find((p) => p.id === l.teacher_id);
+      const subj = (subjectsRes.data || []).find((s) => s.id === l.subject_id);
       
       // Convert times to course timezone for display (management sees course timezone)
       let displayStartTime = l.start_time;
@@ -301,15 +300,4 @@ export function ManagementDashboard() {
       />
     </div>
   );
-}
-
-const getStatusVariant = (status: string) => {
-  switch (status) {
-    case 'scheduled': return 'info';
-    case 'live': return 'warning';
-    case 'completed': return 'success';
-    case 'cancelled': return 'destructive';
-    case 'absent': return 'secondary';
-    default: return 'default';
-  }
 }

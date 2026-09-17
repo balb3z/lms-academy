@@ -51,8 +51,6 @@ export function generateLessonDates(
 
   if (dayNums.size === 0 || totalLessons < 1) return results;
 
-  const endTimeLocal = addMinutesToTime(preferredTime, durationMinutes);
-  
   // Parse start date components
   const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
   
@@ -130,12 +128,8 @@ function addDaysInTimezone(date: Date, days: number, timezone: string): Date {
   const day = parseInt(get('day'));
   const hour = parseInt(get('hour'));
   const minute = parseInt(get('minute'));
-  const second = parseInt(get('second'));
   
-  // Create a new date in the target timezone at the same local time + days
-  const newLocal = new Date(year, month, day + days, hour, minute, second);
-  
-  // Convert back to UTC using the timezone
+  // Convert the new local date/time back to UTC
   const newDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day + days).padStart(2, '0')}`;
   const newTimeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
   
@@ -186,7 +180,7 @@ export interface BuildLessonRowsParams {
  * 
  * Lessons are stored with both local times (in course timezone) and UTC times.
  */
-export function buildCourseLessonRows(params: BuildLessonRowsParams): Record<string, any>[] {
+export function buildCourseLessonRows(params: BuildLessonRowsParams): Record<string, unknown>[] {
   const dates = generateLessonDates(
     params.startDate,
     params.totalLessons,

@@ -19,7 +19,7 @@ export function Login() {
     setError(null);
     try {
       await signIn(email, password);
-    } catch (err: any) {
+    } catch (err) {
       setError(err.message || 'Login failed');
     } finally {
       setLoading(false);

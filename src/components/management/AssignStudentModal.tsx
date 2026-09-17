@@ -80,17 +80,17 @@ export function AssignStudentModal({ open, onClose, onSuccess, course, excludeSt
         .eq('is_active', true);
 
       const available = (studentRows || []).filter(
-        (s: any) => !excludeStudentIds.includes(s.id),
+        (s: { id: string }) => !excludeStudentIds.includes(s.id),
       );
-      const ids = available.map((s: any) => s.id);
+      const ids = available.map((s: { id: string }) => s.id);
 
       const { data: profiles } = ids.length > 0
         ? await supabase.from('profiles').select('id, full_name').in('id', ids)
-        : { data: [] as any[] };
+        : { data: [] as { id: string; full_name: string }[] };
 
       setStudents(
-        available.map((s: any) => {
-          const p = (profiles || []).find((x: any) => x.id === s.id);
+        available.map((s: { id: string; student_id: string }) => {
+          const p = (profiles || []).find((x: { id: string; full_name: string }) => x.id === s.id);
           return { id: s.id, student_id: s.student_id, full_name: p?.full_name || `Student (${s.student_id})` };
         }),
       );
@@ -180,7 +180,7 @@ export function AssignStudentModal({ open, onClose, onSuccess, course, excludeSt
       toast.success(`Student assigned — ${lessonRows.length} lessons scheduled.`);
       onSuccess();
       onClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error assigning student to course:', err);
       toast.error(err.message || 'Failed to assign student.');
     } finally {

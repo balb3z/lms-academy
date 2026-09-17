@@ -8,7 +8,7 @@ import { Lesson, LessonReport } from '@/types';
 import { formatDate, formatTime } from '@/utils/format';
 import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
 import { ArrowLeft, Calendar, Clock, Video, BookOpen, Award, ClipboardList, GraduationCap } from 'lucide-react';
-import { RATING_LABEL, RATING_VARIANT, BadgeVariant } from '@/pages/management/LessonDetails';
+import { RATING_LABEL, RATING_VARIANT } from '@/pages/management/LessonDetails';
 
 export function StudentLessonDetails() {
   const { id } = useParams();
@@ -36,7 +36,7 @@ export function StudentLessonDetails() {
       }
       setLesson(data);
 
-      const [subjectRes, teacherProfileRes, teacherUserRes, teacherRes, reportRes, courseRes] = await Promise.all([
+      const [subjectRes, teacherProfileRes, teacherUserRes, reportRes, courseRes] = await Promise.all([
         data.subject_id
           ? supabase.from('subjects').select('id, name, color').eq('id', data.subject_id).single()
           : Promise.resolve({ data: null }),

@@ -64,7 +64,7 @@ export function CoursePaymentModal({
     setLoading(true);
 
     try {
-      const paymentRow: Record<string, any> = {
+      const paymentRow: Record<string, unknown> = {
         course_id: courseId,
         student_id: studentId,
         amount,
@@ -94,7 +94,7 @@ export function CoursePaymentModal({
       onSuccess();
       onClose();
       setFormData(blankForm());
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error recording payment:', err);
       toast.error(err.message || 'Failed to record payment.');
     } finally {
@@ -193,7 +193,7 @@ export function CoursePaymentModal({
               id="update_payment_status"
               className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
               value={formData.update_payment_status}
-              onChange={e => setFormData(p => ({ ...p, update_payment_status: e.target.value as any }))}
+              onChange={e => setFormData(p => ({ ...p, update_payment_status: e.target.value }))}
             >
               <option value="">— Keep current status —</option>
               <option value="paid">Paid</option>

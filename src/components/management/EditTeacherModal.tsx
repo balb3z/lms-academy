@@ -47,7 +47,6 @@ export function EditTeacherModal({ open, onClose, onSuccess, teacherId }: Props)
     if (open && teacherId) {
       loadTeacher(teacherId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, teacherId]);
 
   const loadTeacher = async (id: string) => {
@@ -116,7 +115,7 @@ export function EditTeacherModal({ open, onClose, onSuccess, teacherId }: Props)
       toast.success('Teacher updated successfully!');
       onSuccess();
       onClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error updating teacher:', err);
       toast.error(err.message || 'Failed to update teacher.');
     } finally {

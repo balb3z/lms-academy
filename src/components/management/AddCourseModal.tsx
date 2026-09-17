@@ -104,28 +104,28 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
         supabase.from('teachers').select('id, teacher_id, zoom_link, timezone').eq('is_active', true),
       ]);
 
-      const sIds = (studentsRes.data || []).map((s: any) => s.id);
-      const tIds = (teachersRes.data || []).map((t: any) => t.id);
+      const sIds = (studentsRes.data || []).map((s: { id: string }) => s.id);
+      const tIds = (teachersRes.data || []).map((t: { id: string }) => t.id);
 
       const [spRes, tpRes] = await Promise.all([
         sIds.length > 0
           ? supabase.from('profiles').select('id, full_name').in('id', sIds)
-          : Promise.resolve({ data: [] as any[] }),
+          : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
         tIds.length > 0
           ? supabase.from('profiles').select('id, full_name').in('id', tIds)
-          : Promise.resolve({ data: [] as any[] }),
+          : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
       ]);
 
       setStudents(
-        (studentsRes.data || []).map((s: any) => {
-          const p = (spRes.data || []).find((x: any) => x.id === s.id);
+        (studentsRes.data || []).map((s: { id: string; student_id: string }) => {
+          const p = (spRes.data || []).find((x: { id: string; full_name: string }) => x.id === s.id);
           return { id: s.id, student_id: s.student_id, full_name: p?.full_name || `Student (${s.student_id})` };
         }),
       );
 
       setTeachers(
-        (teachersRes.data || []).map((t: any) => {
-          const p = (tpRes.data || []).find((x: any) => x.id === t.id);
+        (teachersRes.data || []).map((t: { id: string; teacher_id: string; zoom_link: string | null; timezone: string }) => {
+          const p = (tpRes.data || []).find((x: { id: string; full_name: string }) => x.id === t.id);
           return { id: t.id, teacher_id: t.teacher_id, full_name: p?.full_name || `Teacher (${t.teacher_id})`, zoom_link: t.zoom_link, timezone: t.timezone };
         }),
       );
@@ -172,7 +172,7 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
     setLoading(true);
 
     try {
-      const courseRow: Record<string, any> = {
+      const courseRow: Record<string, unknown> = {
         name: formData.name.trim(),
         student_id: formData.student_id,
         teacher_id: formData.teacher_id,
@@ -279,7 +279,7 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
       setStep('success');
       onSuccess();
       toast.success(`Course created with ${lessonRows.length} lessons scheduled!`);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error creating course:', err);
       toast.error(err.message || 'Failed to create course.');
     } finally {

@@ -35,7 +35,6 @@ export function TeacherLessonDetails() {
   const [studentEmail, setStudentEmail] = useState('');
   const [zoomLink, setZoomLink] = useState<string | null>(null);
   const [teacherTimezone, setTeacherTimezone] = useState<string>('UTC');
-  const [courseTimezone, setCourseTimezone] = useState<string>('UTC');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -54,7 +53,7 @@ export function TeacherLessonDetails() {
       }
       setLesson(data);
 
-      const [subjectRes, studentProfileRes, studentUserRes, teacherRes, reportRes, courseRes] = await Promise.all([
+      const [subjectRes, studentProfileRes, studentUserRes, teacherRes, reportRes] = await Promise.all([
         data.subject_id
           ? supabase.from('subjects').select('id, name, color').eq('id', data.subject_id).single()
           : Promise.resolve({ data: null }),
@@ -67,9 +66,6 @@ export function TeacherLessonDetails() {
           .eq('lesson_id', id)
           .order('submitted_at', { ascending: false })
           .limit(1),
-        data.course_id
-          ? supabase.from('courses').select('timezone').eq('id', data.course_id).single()
-          : Promise.resolve({ data: null }),
       ]);
 
       setLesson(prev => (prev ? { ...prev, subject: subjectRes.data || undefined } : prev));
@@ -77,7 +73,6 @@ export function TeacherLessonDetails() {
       setStudentEmail(studentUserRes.data?.email || '');
       setZoomLink(teacherRes.data?.zoom_link || null);
       setTeacherTimezone(teacherRes.data?.timezone || 'UTC');
-      setCourseTimezone(courseRes.data?.timezone || 'UTC');
       setReport(((reportRes.data as LessonReport[]) || [])[0] || null);
     } catch (err) {
       console.error('Error loading lesson:', err);
@@ -137,7 +132,6 @@ export function TeacherLessonDetails() {
 
   // Determine display times - teacher sees in their timezone
   const teacherTz = teacherTimezone;
-  const courseTz = courseTimezone;
   
   const displayStartTime = lesson.start_time_utc && lesson.end_time_utc && teacherTz
     ? formatTimeInTimezone(lesson.start_time_utc, teacherTz)
@@ -332,15 +326,4 @@ export function TeacherLessonDetails() {
       </div>
     </div>
   );
-}
-
-function getStatusVariant(status: string) {
-  switch (status) {
-    case 'scheduled': return 'info';
-    case 'live': return 'warning';
-    case 'completed': return 'success';
-    case 'cancelled': return 'destructive';
-    case 'absent': return 'secondary';
-    default: return 'default';
-  }
 }

@@ -5,7 +5,7 @@ export function useSupabase() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const execute = useCallback(async <T>(query: Promise<{ data: T | null; error: any }>) => {
+  const execute = useCallback(async <T>(query: Promise<{ data: T | null; error: Error | null }>) => {
     setLoading(true);
     setError(null);
     try {

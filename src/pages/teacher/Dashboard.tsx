@@ -7,16 +7,15 @@ import { StatsCard } from '@/components/ui/StatsCard';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Lesson } from '@/types';
-import { formatTime } from '@/utils/format';
 import { formatTimeInTimezone, formatDateInTimezone, getCurrentDateInTimezone } from '@/utils/timezone';
-import { Play, FileText, Users, Calendar, Clock, Video } from 'lucide-react';
+import { Play, FileText, Video } from 'lucide-react';
+import { toast } from 'react-toastify';
 
 export function TeacherDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [todayLessons, setTodayLessons] = useState<Lesson[]>([]);
   const [pendingReports, setPendingReports] = useState<Lesson[]>([]);
-  const [zoomLink, setZoomLink] = useState<string | null>(null);
   const [teacherTimezone, setTeacherTimezone] = useState<string>('UTC');
   const [stats, setStats] = useState({
     totalStudents: 0,
@@ -30,7 +29,7 @@ export function TeacherDashboard() {
     if (user) {
       fetchTeacherData();
     }
-  }, [user]);
+  }, [user, fetchTeacherData]);
 
   // Helper to attach student names + subjects + course timezone to lessons
   const attachRelations = async (rows: { student_id: string; subject_id?: string; course_id?: string; start_time_utc?: string }[]): Promise<Lesson[]> => {
@@ -53,14 +52,13 @@ export function TeacherDashboard() {
     ]);
 
     const courseTimezoneMap: Record<string, string> = {};
-    (coursesRes.data || []).forEach((c: any) => {
+    (coursesRes.data || []).forEach((c: { id: string; timezone: string }) => {
       courseTimezoneMap[c.id] = c.timezone || 'UTC';
     });
 
     return rows.map(r => {
       const sp = (studentProfilesRes.data || []).find((p: { id: string; full_name: string }) => p.id === r.student_id);
       const subj = (subjectsRes.data || []).find((s: { id: string; name: string; color: string }) => s.id === r.subject_id);
-      const courseTz = r.course_id ? courseTimezoneMap[r.course_id] || 'UTC' : 'UTC';
       
       // Convert lesson times to teacher's timezone for display
       let displayStartTime = r.start_time;
@@ -96,10 +94,9 @@ export function TeacherDashboard() {
       // Teacher's own record (for the personal Zoom link and timezone)
       const { data: teacherRow } = await supabase
         .from('teachers')
-        .select('zoom_link, timezone')
+        .select('timezone')
         .eq('id', teacherId)
         .single();
-      setZoomLink(teacherRow?.zoom_link || null);
       setTeacherTimezone(teacherRow?.timezone || 'UTC');
 
       // 1. Get teacher's courses with timezones
@@ -335,14 +332,4 @@ export function TeacherDashboard() {
       </Card>
     </div>
   );
-}
-
-function getStatusVariant(status: string) {
-  switch (status) {
-    case 'scheduled': return 'info';
-    case 'live': return 'warning';
-    case 'completed': return 'success';
-    case 'cancelled': return 'destructive';
-    default: return 'default';
-  }
 }

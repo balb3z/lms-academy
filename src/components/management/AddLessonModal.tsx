@@ -178,7 +178,7 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
         meeting_url: '',
         notes: ''
       });
-    } catch (error: any) {
+    } catch (err: unknown) {
       console.error('Error creating lesson:', error);
       toast.error(error.message || 'Failed to schedule lesson.');
     } finally {

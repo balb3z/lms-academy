@@ -7,9 +7,8 @@ import { StatsCard } from '@/components/ui/StatsCard';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Lesson, LessonReport } from '@/types';
-import { formatTime } from '@/utils/format';
 import { formatTimeInTimezone, formatDateInTimezone, getCurrentDateInTimezone } from '@/utils/timezone';
-import { Video, Calendar, FileText, Bell, Clock } from 'lucide-react';
+import { Video, FileText, Bell, Clock } from 'lucide-react';
 
 export function StudentDashboard() {
   const { user } = useAuth();
@@ -23,7 +22,7 @@ export function StudentDashboard() {
     rate: 0
   });
   const [recentReports, setRecentReports] = useState<LessonReport[]>([]);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<{ id: string; title: string; message: string; created_at: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -31,7 +30,7 @@ export function StudentDashboard() {
       fetchStudentData();
       fetchNotifications();
     }
-  }, [user]);
+  }, [user, fetchStudentData, fetchNotifications]);
 
   // Helper to attach teacher names + subjects + course timezone to lessons
   const attachRelations = async (rows: { teacher_id: string; subject_id?: string; course_id?: string; start_time_utc?: string }[]): Promise<Lesson[]> => {
@@ -144,16 +143,13 @@ export function StudentDashboard() {
       const nextWeekMap: Record<string, string> = {};
       courseIds.forEach(courseId => {
         const tz = courseTimezoneMap[courseId] || 'UTC';
-        const nextWeek = new Date();
-        // Get current date in that timezone, add 7 days
-        const nowInTz = new Date();
         const formatter = new Intl.DateTimeFormat('en-US', {
           timeZone: tz,
           year: 'numeric',
           month: '2-digit',
           day: '2-digit',
         });
-        const parts = formatter.formatToParts(nowInTz);
+        const parts = formatter.formatToParts(new Date());
         const get = (type: string) => parts.find(p => p.type === type)?.value || '';
         const year = parseInt(get('year'));
         const month = parseInt(get('month')) - 1;
