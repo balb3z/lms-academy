@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -9,6 +9,85 @@ import { useAuth } from '@/hooks/useAuth';
 import { Lesson, LessonReport } from '@/types';
 import { formatTimeInTimezone, formatDateInTimezone, getCurrentDateInTimezone } from '@/utils/timezone';
 import { Video, FileText, Bell, Clock } from 'lucide-react';
+import { toast } from 'react-toastify';
+import { openExternal } from '../../utils/safeUrl';
+
+interface CourseTzRow {
+  id: string;
+  timezone: string | null;
+}
+
+// Attach teacher names + subjects + course timezone to lessons
+async function attachRelations(rows: Lesson[]): Promise<Lesson[]> {
+  if (!rows || rows.length === 0) return [];
+
+  const teacherIds = [...new Set(rows.map(r => r.teacher_id).filter(Boolean))];
+  const subjectIds = [...new Set(rows.map(r => r.subject_id).filter((x): x is string => Boolean(x)))];
+  const courseIds = [...new Set(rows.map(r => r.course_id).filter((x): x is string => Boolean(x)))];
+
+  const [teacherProfilesRes, teacherZoomRes, subjectsRes, coursesRes] = await Promise.all([
+    teacherIds.length > 0
+      ? supabase.from('profiles').select('id, full_name').in('id', teacherIds)
+      : Promise.resolve({ data: [] as { id: string; full_name: string }[], error: null }),
+    teacherIds.length > 0
+      ? supabase.from('teachers').select('id, zoom_link').in('id', teacherIds)
+      : Promise.resolve({ data: [] as { id: string; zoom_link: string | null }[], error: null }),
+    subjectIds.length > 0
+      ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
+      : Promise.resolve({ data: [] as { id: string; name: string; color: string }[], error: null }),
+    courseIds.length > 0
+      ? supabase.from('courses').select('id, timezone').in('id', courseIds)
+      : Promise.resolve({ data: [] as CourseTzRow[], error: null }),
+  ]);
+
+  const relErr = teacherProfilesRes.error || teacherZoomRes.error || subjectsRes.error || coursesRes.error;
+  if (relErr) console.error('Error fetching lesson relations:', relErr);
+
+  const courseTimezoneMap: Record<string, string> = {};
+  (coursesRes.data || []).forEach((c: CourseTzRow) => {
+    courseTimezoneMap[c.id] = c.timezone || 'UTC';
+  });
+
+  return rows.map(r => {
+    const tp = (teacherProfilesRes.data || []).find((p: { id: string; full_name: string }) => p.id === r.teacher_id);
+    const tz = (teacherZoomRes.data || []).find((t: { id: string; zoom_link: string | null }) => t.id === r.teacher_id);
+    const subj = (subjectsRes.data || []).find((s: { id: string; name: string; color: string }) => s.id === r.subject_id);
+    const courseTz = r.course_id ? courseTimezoneMap[r.course_id] || 'UTC' : 'UTC';
+
+    // Convert lesson times to course timezone for display
+    let displayStartTime = r.start_time;
+    let displayEndTime = r.end_time;
+    let displayDate = r.scheduled_date;
+
+    if (r.start_time_utc && r.end_time_utc) {
+      const s = formatTimeInTimezone(r.start_time_utc, courseTz);
+      const e = formatTimeInTimezone(r.end_time_utc, courseTz);
+      const d = formatDateInTimezone(r.start_time_utc, courseTz);
+      if (s) displayStartTime = s;
+      if (e) displayEndTime = e;
+      if (d) displayDate = d;
+    }
+
+    return {
+      ...r,
+      start_time: displayStartTime,
+      end_time: displayEndTime,
+      scheduled_date: displayDate,
+      teacher: {
+        id: r.teacher_id,
+        zoom_link: tz?.zoom_link || undefined,
+        profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined,
+      } as Lesson['teacher'],
+      subject: (subj || undefined) as Lesson['subject'],
+    };
+  });
+}
+
+function addDays(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
+}
 
 export function StudentDashboard() {
   const { user } = useAuth();
@@ -25,177 +104,75 @@ export function StudentDashboard() {
   const [notifications, setNotifications] = useState<{ id: string; title: string; message: string; created_at: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (user) {
-      fetchStudentData();
-      fetchNotifications();
-    }
-  }, [user, fetchStudentData, fetchNotifications]);
+  const userId = user?.id;
 
-  // Helper to attach teacher names + subjects + course timezone to lessons
-  const attachRelations = async (rows: { teacher_id: string; subject_id?: string; course_id?: string; start_time_utc?: string }[]): Promise<Lesson[]> => {
-    if (!rows || rows.length === 0) return [];
-
-    const teacherIds = [...new Set(rows.map(r => r.teacher_id).filter(Boolean))];
-    const subjectIds = [...new Set(rows.map(r => r.subject_id).filter(Boolean))];
-    const courseIds = [...new Set(rows.map(r => r.course_id).filter(Boolean))];
-
-    const [teacherProfilesRes, teacherZoomRes, subjectsRes, coursesRes] = await Promise.all([
-      teacherIds.length > 0
-        ? supabase.from('profiles').select('id, full_name').in('id', teacherIds)
-        : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
-      teacherIds.length > 0
-        ? supabase.from('teachers').select('id, zoom_link').in('id', teacherIds)
-        : Promise.resolve({ data: [] as { id: string; zoom_link: string }[] }),
-      subjectIds.length > 0
-        ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
-        : Promise.resolve({ data: [] as { id: string; name: string; color: string }[] }),
-      courseIds.length > 0
-        ? supabase.from('courses').select('id, timezone').in('id', courseIds)
-        : Promise.resolve({ data: [] as { id: string; timezone: string }[] }),
-    ]);
-
-    const courseTimezoneMap: Record<string, string> = {};
-    (coursesRes.data || []).forEach((c: any) => {
-      courseTimezoneMap[c.id] = c.timezone || 'UTC';
-    });
-
-    return rows.map(r => {
-      const tp = (teacherProfilesRes.data || []).find((p: { id: string; full_name: string }) => p.id === r.teacher_id);
-      const tz = (teacherZoomRes.data || []).find((t: { id: string; zoom_link: string }) => t.id === r.teacher_id);
-      const subj = (subjectsRes.data || []).find((s: { id: string; name: string; color: string }) => s.id === r.subject_id);
-      const courseTz = r.course_id ? courseTimezoneMap[r.course_id] || 'UTC' : 'UTC';
-      
-      // Convert lesson times to course timezone for display
-      let displayStartTime = r.start_time;
-      let displayEndTime = r.end_time;
-      let displayDate = r.scheduled_date;
-      
-      if (r.start_time_utc && r.end_time_utc && courseTz) {
-        try {
-          displayStartTime = formatTimeInTimezone(r.start_time_utc, courseTz);
-          displayEndTime = formatTimeInTimezone(r.end_time_utc, courseTz);
-          displayDate = formatDateInTimezone(r.start_time_utc, courseTz);
-        } catch (e) {
-          console.warn('Failed to convert timezone for lesson:', r.id, e);
-        }
-      }
-      
-      return {
-        ...r,
-        start_time: displayStartTime,
-        end_time: displayEndTime,
-        scheduled_date: displayDate,
-        teacher: {
-          id: r.teacher_id,
-          zoom_link: tz?.zoom_link || undefined,
-          profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined,
-        },
-        subject: subj || undefined,
-      };
-    });
-  };
-
-  const fetchStudentData = async () => {
-    const studentId = user?.id;
+  const fetchStudentData = useCallback(async () => {
+    if (!userId) return;
+    const studentId = userId;
     setLoading(true);
 
     try {
       // 1. Get student's courses with timezones
-      const { data: enrollments } = await supabase
+      const { data: enrollments, error: enrollErr } = await supabase
         .from('course_enrollments')
         .select('course_id, course:course_id(timezone)')
         .eq('student_id', studentId)
         .eq('is_active', true);
+      if (enrollErr) throw enrollErr;
 
       const courseTimezoneMap: Record<string, string> = {};
-      (enrollments || []).forEach((e: any) => {
-        if (e.course?.timezone) {
-          courseTimezoneMap[e.course_id] = e.course.timezone;
-        }
+      ((enrollments || []) as unknown as { course_id: string; course: { timezone: string | null } | null }[]).forEach((e) => {
+        courseTimezoneMap[e.course_id] = e.course?.timezone || 'UTC';
       });
 
       const courseIds = Object.keys(courseTimezoneMap);
-      
-      // 2. For each course, determine "today" in that course's timezone
+
+      // 2. For each course, "today" in that course's timezone
       const courseTodayMap: Record<string, string> = {};
       courseIds.forEach(courseId => {
-        const tz = courseTimezoneMap[courseId] || 'UTC';
-        courseTodayMap[courseId] = getCurrentDateInTimezone(tz);
+        courseTodayMap[courseId] = getCurrentDateInTimezone(courseTimezoneMap[courseId] || 'UTC');
       });
 
-      // 3. Fetch today's lessons across all courses
-      const todayLessonsPromises = courseIds.map(courseId => {
-        const today = courseTodayMap[courseId];
-        return supabase
+      // 3. Today's lessons across all courses
+      const todayResults = await Promise.all(courseIds.map(courseId =>
+        supabase
           .from('lessons')
           .select('*')
           .eq('student_id', studentId)
           .eq('course_id', courseId)
-          .eq('scheduled_date', today)
-          .order('start_time');
-      });
+          .eq('scheduled_date', courseTodayMap[courseId])
+          .order('start_time')
+      ));
+      const todayErr = todayResults.find(r => r.error)?.error;
+      if (todayErr) throw todayErr;
+      const todayRows = todayResults.flatMap(r => (r.data || []) as Lesson[]);
 
-      const todayResults = await Promise.all(todayLessonsPromises);
-      const todayRows = todayResults.flatMap(r => r.data || []);
-
-      // 4. Fetch upcoming lessons (next 7 days across all courses)
-      const nextWeekMap: Record<string, string> = {};
-      courseIds.forEach(courseId => {
-        const tz = courseTimezoneMap[courseId] || 'UTC';
-        const formatter = new Intl.DateTimeFormat('en-US', {
-          timeZone: tz,
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-        });
-        const parts = formatter.formatToParts(new Date());
-        const get = (type: string) => parts.find(p => p.type === type)?.value || '';
-        const year = parseInt(get('year'));
-        const month = parseInt(get('month')) - 1;
-        const day = parseInt(get('day'));
-        const nextWeekDate = new Date(Date.UTC(year, month, day + 7));
-        const nextWeekFormatter = new Intl.DateTimeFormat('en-US', {
-          timeZone: tz,
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-        });
-        const nextWeekParts = nextWeekFormatter.formatToParts(nextWeekDate);
-        const getNext = (type: string) => nextWeekParts.find(p => p.type === type)?.value || '';
-        courseTodayMap[courseId] = `${getNext('year')}-${getNext('month')}-${getNext('day')}`;
-        nextWeekMap[courseId] = `${getNext('year')}-${getNext('month')}-${getNext('day')}`;
-      });
-
-      const upcomingPromises = courseIds.map(courseId => {
-        const today = courseTodayMap[courseId];
-        const nextWeek = nextWeekMap[courseId];
-        return supabase
+      // 4. Upcoming lessons (next 7 days across all courses)
+      const upcomingResults = await Promise.all(courseIds.map(courseId =>
+        supabase
           .from('lessons')
           .select('*')
           .eq('student_id', studentId)
           .eq('course_id', courseId)
-          .gt('scheduled_date', today)
-          .lte('scheduled_date', nextWeek)
+          .gt('scheduled_date', courseTodayMap[courseId])
+          .lte('scheduled_date', addDays(courseTodayMap[courseId], 7))
           .neq('status', 'completed')
           .order('scheduled_date')
-          .order('start_time');
-      });
+          .order('start_time')
+      ));
+      const upErr = upcomingResults.find(r => r.error)?.error;
+      if (upErr) throw upErr;
+      const upcomingRows = upcomingResults.flatMap(r => (r.data || []) as Lesson[]);
 
-      const upcomingResults = await Promise.all(upcomingPromises);
-      const upcomingRows = upcomingResults.flatMap(r => r.data || []);
-
-      // 5. Enrich today's lessons
       setTodayLessons(await attachRelations(todayRows));
-      
-      // 6. Enrich upcoming lessons
       setUpcomingLessons(await attachRelations(upcomingRows));
 
-      // 7. Attendance stats
-      const { data: attendance } = await supabase
+      // 5. Attendance stats
+      const { data: attendance, error: attErr } = await supabase
         .from('attendance')
         .select('status')
         .eq('student_id', studentId);
+      if (attErr) console.error('Error fetching attendance:', attErr);
 
       const present = attendance?.filter(a => a.status === 'present').length || 0;
       const late = attendance?.filter(a => a.status === 'late').length || 0;
@@ -209,50 +186,69 @@ export function StudentDashboard() {
         rate: total > 0 ? Math.round((present / total) * 100) : 0
       });
 
-      // 8. Recent reports
-      const { data: reports } = await supabase
+      // 6. Recent reports
+      const { data: reports, error: repErr } = await supabase
         .from('lesson_reports')
         .select('*, lesson:lesson_id (*)')
         .eq('student_id', studentId)
         .eq('is_visible_to_student', true)
         .order('submitted_at', { ascending: false })
         .limit(3);
+      if (repErr) console.error('Error fetching reports:', repErr);
 
       let reportsEnriched: LessonReport[] = (reports as LessonReport[]) || [];
       if (reportsEnriched.length > 0) {
-        const tIds = [...new Set(reportsEnriched.map((r: any) => r.teacher_id).filter(Boolean))];
-        const { data: tProfiles } = tIds.length > 0
-          ? await supabase.from('profiles').select('id, full_name').in('id', tIds)
-          : { data: [] as any[] };
-        reportsEnriched = reportsEnriched.map((r: any) => {
-          const tp = (tProfiles || []).find((p: any) => p.id === r.teacher_id);
-          return { ...r, teacher: { id: r.teacher_id, profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined } };
+        const tIds = [...new Set(reportsEnriched.map(r => r.teacher_id).filter(Boolean))];
+        const { data: tProfiles, error: tpErr } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', tIds);
+        if (tpErr) console.error('Error fetching teacher profiles:', tpErr);
+        reportsEnriched = reportsEnriched.map(r => {
+          const tp = (tProfiles || []).find((p: { id: string; full_name: string }) => p.id === r.teacher_id);
+          return {
+            ...r,
+            teacher: { id: r.teacher_id, profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined } as LessonReport['teacher'],
+          };
         });
       }
       setRecentReports(reportsEnriched);
     } catch (error) {
       console.error('Error fetching student data:', error);
+      toast.error('Failed to load your dashboard. Please try again.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
 
-  const fetchNotifications = async () => {
-    const { data } = await supabase
+  const fetchNotifications = useCallback(async () => {
+    if (!userId) return;
+    const { data, error } = await supabase
       .from('notifications')
       .select('*')
-      .eq('user_id', user?.id)
+      .eq('user_id', userId)
       .eq('is_read', false)
       .order('created_at', { ascending: false })
       .limit(5);
 
+    if (error) {
+      console.error('Error fetching notifications:', error);
+      return;
+    }
     setNotifications(data || []);
-  };
+  }, [userId]);
+
+  useEffect(() => {
+    if (userId) {
+      fetchStudentData();
+      fetchNotifications();
+    }
+  }, [userId, fetchStudentData, fetchNotifications]);
 
   const handleJoinMeeting = (lesson: Lesson) => {
     const link = lesson.teacher?.zoom_link || lesson.meeting_url;
     if (link) {
-      window.open(link, '_blank', 'noopener,noreferrer');
+      openExternal(link);
     }
   };
 

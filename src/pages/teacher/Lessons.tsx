@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { toast } from 'react-toastify';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -10,124 +11,84 @@ import { useAuth } from '@/hooks/useAuth';
 import { Lesson } from '@/types';
 import { Search, Eye, Calendar } from 'lucide-react';
 import { formatDate, formatTime } from '@/utils/format';
-import { formatTimeInTimezone, formatDateInTimezone, getCurrentDateInTimezone } from '@/utils/timezone';
+import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
+
+type DisplayLesson = Lesson & { displayDate: string; displayTime: string };
 
 export function TeacherLessons() {
   const { user } = useAuth();
-  const [lessons, setLessons] = useState<Lesson[]>([]);
+  const [lessons, setLessons] = useState<DisplayLesson[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [teacherTimezone, setTeacherTimezone] = useState<string>('UTC');
   const navigate = useNavigate();
 
-  useEffect(() => {
-    if (user) {
-      fetchTeacherData();
-      fetchLessons();
-    }
-  }, [user]);
+  const userId = user?.id;
 
-  const fetchTeacherData = async () => {
-    const teacherId = user?.id;
-    const { data: teacherRow } = await supabase
-      .from('teachers')
-      .select('timezone')
-      .eq('id', teacherId)
-      .single();
-    setTeacherTimezone(teacherRow?.timezone || 'UTC');
-  };
-
-  const fetchLessons = async () => {
-    const teacherId = user?.id;
+  const fetchLessons = useCallback(async () => {
+    if (!userId) return;
     setLoading(true);
 
     try {
+      const { data: teacherRow, error: teacherErr } = await supabase
+        .from('teachers')
+        .select('timezone')
+        .eq('id', userId)
+        .maybeSingle();
+      if (teacherErr) throw teacherErr;
+      const teacherTimezone = teacherRow?.timezone || 'UTC';
+
       // Query lessons directly by teacher_id so every lesson the teacher owns
-      // appears — including course-generated ones.
+      // appears, including course-generated ones.
       const { data: rows, error } = await supabase
         .from('lessons')
         .select('*')
-        .eq('teacher_id', teacherId)
+        .eq('teacher_id', userId)
         .order('scheduled_date', { ascending: false })
         .order('start_time');
+      if (error) throw error;
 
-      if (error) {
-        console.error('Error fetching teacher lessons:', error);
-        setLessons([]);
-        setLoading(false);
-        return;
-      }
+      const lessonRows = (rows || []) as Lesson[];
+      const studentIds = [...new Set(lessonRows.map(l => l.student_id).filter(Boolean))];
+      const subjectIds = [...new Set(lessonRows.map(l => l.subject_id).filter((x): x is string => Boolean(x)))];
 
-      const lessonRows = rows || [];
-      const studentIds = [...new Set(lessonRows.map((l: any) => l.student_id).filter(Boolean))];
-      const subjectIds = [...new Set(lessonRows.map((l: any) => l.subject_id).filter(Boolean))];
-      const courseIds = [...new Set(lessonRows.map((l: any) => l.course_id).filter(Boolean))];
-
-      const [profilesRes, subjectsRes, coursesRes] = await Promise.all([
+      const [profilesRes, subjectsRes] = await Promise.all([
         studentIds.length > 0
           ? supabase.from('profiles').select('id, full_name').in('id', studentIds)
-          : Promise.resolve({ data: [] as any[] }),
+          : Promise.resolve({ data: [] as { id: string; full_name: string }[], error: null }),
         subjectIds.length > 0
           ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
-          : Promise.resolve({ data: [] as any[] }),
-        courseIds.length > 0
-          ? supabase.from('courses').select('id, timezone').in('id', courseIds)
-          : Promise.resolve({ data: [] as any[] }),
+          : Promise.resolve({ data: [] as { id: string; name: string; color: string }[], error: null }),
       ]);
+      const relErr = profilesRes.error || subjectsRes.error;
+      if (relErr) throw relErr;
 
-      const courseTimezoneMap: Record<string, string> = {};
-      (coursesRes.data || []).forEach((c: any) => {
-        if (c.timezone) courseTimezoneMap[c.id] = c.timezone;
-      });
+      const enriched: DisplayLesson[] = lessonRows.map(l => {
+        const sp = (profilesRes.data || []).find((p: { id: string; full_name: string }) => p.id === l.student_id);
+        const subj = (subjectsRes.data || []).find((s: { id: string; name: string; color: string }) => s.id === l.subject_id);
 
-      const enriched: Lesson[] = lessonRows.map((l: any) => {
-        const sp = (profilesRes.data || []).find((p: any) => p.id === l.student_id);
-        const subj = (subjectsRes.data || []).find((s: any) => s.id === l.subject_id);
-        const courseTz = l.course_id ? courseTimezoneMap[l.course_id] || 'UTC' : 'UTC';
-        
-        // Convert times to teacher's timezone for display
-        let displayStartTime = l.start_time;
-        let displayEndTime = l.end_time;
-        let displayDate = l.scheduled_date;
-        
-        if (l.start_time_utc && l.end_time_utc && teacherTimezone) {
-          try {
-            displayStartTime = formatTimeInTimezone(l.start_time_utc, teacherTimezone);
-            displayEndTime = formatTimeInTimezone(l.end_time_utc, teacherTimezone);
-            displayDate = formatDateInTimezone(l.start_time_utc, teacherTimezone);
-          } catch (e) {
-            console.warn('Failed to convert timezone for lesson:', l.id, e);
-          }
-        }
-        
+        // Convert times to teacher's timezone for display (helpers return '' for invalid input)
+        const hasUtc = Boolean(l.start_time_utc && l.end_time_utc);
         return {
           ...l,
-          start_time: displayStartTime,
-          end_time: displayEndTime,
-          scheduled_date: displayDate,
-          student: { id: l.student_id, profile: sp ? { id: sp.id, full_name: sp.full_name } : undefined },
-          subject: subj || undefined,
+          displayDate: (hasUtc && formatDateInTimezone(l.start_time_utc, teacherTimezone)) || formatDate(l.scheduled_date),
+          displayTime: `${(hasUtc && formatTimeInTimezone(l.start_time_utc, teacherTimezone)) || formatTime(l.start_time)} - ${(hasUtc && formatTimeInTimezone(l.end_time_utc, teacherTimezone)) || formatTime(l.end_time)}`,
+          student: { id: l.student_id, profile: sp ? { id: sp.id, full_name: sp.full_name } : undefined } as Lesson['student'],
+          subject: (subj || undefined) as Lesson['subject'],
         };
       });
 
       setLessons(enriched);
     } catch (err) {
-      console.error('Unexpected error loading teacher lessons:', err);
+      console.error('Error loading teacher lessons:', err);
+      toast.error('Failed to load lessons.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
 
-  const getStatusVariant = (status: string) => {
-    switch (status) {
-      case 'scheduled': return 'info';
-      case 'live': return 'warning';
-      case 'completed': return 'success';
-      case 'cancelled': return 'destructive';
-      case 'absent': return 'secondary';
-      default: return 'default';
-    }
-  };
+  useEffect(() => {
+    fetchLessons();
+  }, [fetchLessons]);
 
   const filteredLessons = lessons.filter(lesson =>
     lesson.title?.toLowerCase().includes(search.toLowerCase()) ||
@@ -189,8 +150,8 @@ export function TeacherLessons() {
               ) : (
                 filteredLessons.map((lesson) => (
                   <TableRow key={lesson.id}>
-                    <TableCell>{formatDate(lesson.scheduled_date)}</TableCell>
-                    <TableCell>{formatTime(lesson.start_time)} - {formatTime(lesson.end_time)}</TableCell>
+                    <TableCell>{lesson.displayDate}</TableCell>
+                    <TableCell>{lesson.displayTime}</TableCell>
                     <TableCell className="font-medium">{lesson.title}</TableCell>
                     <TableCell>{lesson.student?.profile?.full_name || '-'}</TableCell>
                     <TableCell>{lesson.subject?.name || '-'}</TableCell>

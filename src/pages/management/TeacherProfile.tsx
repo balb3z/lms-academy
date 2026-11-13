@@ -1,11 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { supabase } from '@/lib/supabase/client';
 import { Teacher } from '@/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/Avatar';
+import { toast } from 'react-toastify';
 import { Mail, Phone, User, GraduationCap, Briefcase, Video, Wallet, CheckCircle } from 'lucide-react';
+import { safeHttpsUrl } from '../../utils/safeUrl';
+
+interface LessonRate {
+  teacher_rate: number | null;
+  course_id: string | null;
+  student_id: string;
+}
 
 export function TeacherProfile() {
   const { id } = useParams();
@@ -15,11 +23,7 @@ export function TeacherProfile() {
   const [completedCount, setCompletedCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (id) fetchTeacher(id);
-  }, [id]);
-
-  const fetchTeacher = async (teacherId: string) => {
+  const fetchTeacher = useCallback(async (teacherId: string) => {
     setLoading(true);
     try {
       // Fetch base rows separately (profiles.id === users.id === teachers.id),
@@ -31,43 +35,50 @@ export function TeacherProfile() {
         supabase.from('lessons').select('teacher_rate, course_id, student_id').eq('teacher_id', teacherId).eq('status', 'completed'),
       ]);
 
+      if (teacherRes.error) toast.error('Failed to load teacher.');
+      if (completedRes.error) toast.error('Failed to load completed lessons.');
+
       if (teacherRes.data) {
         setTeacher({ ...teacherRes.data, profile: profileRes.data || undefined });
       }
       setEmail(userRes.data?.email ?? '');
 
-      const completed = completedRes.data || [];
+      const completed = (completedRes.data || []) as LessonRate[];
       setCompletedCount(completed.length);
 
       // Earnings with enrollment-rate fallback for lessons missing a stamped rate
-      const missingRate = completed.filter((l: any) => l.teacher_rate == null && l.course_id);
+      const missingRate = completed.filter(l => l.teacher_rate == null && l.course_id);
       const enrollmentRateMap: Record<string, number> = {};
       if (missingRate.length > 0) {
-        const courseIds = [...new Set(missingRate.map((l: any) => l.course_id))];
+        const courseIds = [...new Set(missingRate.map(l => l.course_id))];
         const { data: enrollments } = await supabase
           .from('course_enrollments')
           .select('course_id, student_id, teacher_rate')
           .in('course_id', courseIds);
-        (enrollments || []).forEach((e: any) => {
+        (enrollments || []).forEach((e: { course_id: string; student_id: string; teacher_rate: number | null }) => {
           if (e.teacher_rate != null) {
             enrollmentRateMap[`${e.course_id}|${e.student_id}`] = Number(e.teacher_rate);
           }
         });
       }
       setEarnings(
-        completed.reduce((sum: number, l: any) => {
+        completed.reduce((sum: number, l) => {
           const rate = l.teacher_rate != null
             ? Number(l.teacher_rate)
             : (enrollmentRateMap[`${l.course_id}|${l.student_id}`] ?? 0);
           return sum + (rate || 0);
         }, 0),
       );
-    } catch (err) {
-      console.error('Error loading teacher profile:', err);
+    } catch {
+      toast.error('Unexpected error loading teacher profile.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (id) fetchTeacher(id);
+  }, [id, fetchTeacher]);
 
   if (loading) {
     return <div className="flex items-center justify-center h-64">Loading...</div>;
@@ -178,9 +189,9 @@ export function TeacherProfile() {
             </div>
             <div className="flex items-center gap-2">
               <Video className="h-4 w-4 text-muted-foreground" />
-              {teacher.zoom_link ? (
+              {safeHttpsUrl(teacher.zoom_link) ? (
                 <a
-                  href={teacher.zoom_link}
+                  href={safeHttpsUrl(teacher.zoom_link) ?? undefined}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-primary underline underline-offset-2 truncate"

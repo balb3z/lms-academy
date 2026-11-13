@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'react-toastify';
+import { safeHttpsUrl } from '@/utils/safeUrl';
 
 interface StudentOption {
   id: string;
@@ -111,6 +112,7 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
     if (!formData.scheduled_date) { toast.error('Please select a date.'); return; }
     if (!formData.start_time || !formData.end_time) { toast.error('Please set start and end times.'); return; }
     if (!formData.meeting_url.trim()) { toast.error('Please enter a meeting URL.'); return; }
+    if (!safeHttpsUrl(formData.meeting_url)) { toast.error('Meeting URL must be a valid https:// link.'); return; }
 
     setLoading(true);
 
@@ -179,8 +181,8 @@ export function AddLessonModal({ open, onClose, onSuccess }: AddLessonModalProps
         notes: ''
       });
     } catch (err: unknown) {
-      console.error('Error creating lesson:', error);
-      toast.error(error.message || 'Failed to schedule lesson.');
+      console.error('Error creating lesson:', err);
+      toast.error((err instanceof Error ? err.message : '') || 'Failed to schedule lesson.');
     } finally {
       setLoading(false);
     }

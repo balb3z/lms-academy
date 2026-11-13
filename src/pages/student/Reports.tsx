@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { toast } from 'react-toastify';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -18,45 +19,46 @@ export function StudentReports() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    if (user) {
-      fetchReports();
-    }
-  }, [user]);
+  const userId = user?.id;
 
-  const fetchReports = async () => {
-    const studentId = user?.id;
+  const fetchReports = useCallback(async () => {
+    if (!userId) return;
+    setLoading(true);
+    try {
+      // Teacher name is resolved separately because lesson_reports.teacher_id
+      // maps to profiles.id (no FK to embed through).
+      const { data: rows, error } = await supabase
+        .from('lesson_reports')
+        .select('*, lesson:lesson_id (*)')
+        .eq('student_id', userId)
+        .eq('is_visible_to_student', true)
+        .order('submitted_at', { ascending: false });
+      if (error) throw error;
 
-    // Fetch reports + lesson in one query. Teacher name is resolved separately
-    // because lesson_reports.teacher_id is the auth user id, which maps to
-    // profiles.id — there is no user_id FK on the teachers table to join through.
-    const { data: rows } = await supabase
-      .from('lesson_reports')
-      .select('*, lesson:lesson_id (*)')
-      .eq('student_id', studentId)
-      .eq('is_visible_to_student', true)
-      .order('submitted_at', { ascending: false });
+      const list = (rows || []) as LessonReport[];
+      const teacherIds = [...new Set(list.map(r => r.teacher_id).filter(Boolean))];
+      let profiles: { id: string; full_name: string }[] = [];
+      if (teacherIds.length > 0) {
+        const { data, error: pErr } = await supabase.from('profiles').select('id, full_name').in('id', teacherIds);
+        if (pErr) throw pErr;
+        profiles = data || [];
+      }
 
-    if (!rows || rows.length === 0) {
-      setReports([]);
+      setReports(list.map(r => {
+        const p = profiles.find(pr => pr.id === r.teacher_id);
+        return { ...r, teacher: { id: r.teacher_id, profile: p ? { id: p.id, full_name: p.full_name } : undefined } as LessonReport['teacher'] };
+      }));
+    } catch (err) {
+      console.error('Error fetching reports:', err);
+      toast.error('Failed to load reports.');
+    } finally {
       setLoading(false);
-      return;
     }
+  }, [userId]);
 
-    // Resolve teacher names from profiles using teacher_id directly.
-    const teacherIds = [...new Set(rows.map((r: any) => r.teacher_id).filter(Boolean))];
-    const { data: profiles } = teacherIds.length > 0
-      ? await supabase.from('profiles').select('id, full_name').in('id', teacherIds)
-      : { data: [] as any[] };
-
-    const enriched = rows.map((r: any) => {
-      const p = (profiles || []).find((pr: any) => pr.id === r.teacher_id);
-      return { ...r, teacher: { id: r.teacher_id, profile: p ? { full_name: p.full_name } : undefined } };
-    });
-
-    setReports(enriched);
-    setLoading(false);
-  };
+  useEffect(() => {
+    fetchReports();
+  }, [fetchReports]);
 
   const filteredReports = reports.filter(report =>
     report.teacher?.profile?.full_name?.toLowerCase().includes(search.toLowerCase()) ||

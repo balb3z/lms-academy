@@ -34,7 +34,6 @@ import { NotFound } from '@/pages/NotFound';
 import 'react-toastify/dist/ReactToastify.css';
 import './index.css';
 
-console.log('✅ App component loading...');
 
 // Error Boundary component
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: Error | null }> {

@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
+import { Badge, BadgeProps } from '@/components/ui/Badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { supabase } from '@/lib/supabase/client';
@@ -18,11 +18,14 @@ function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+function formatDate(iso?: string | null) {
+  if (!iso) return '-';
+  const d = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function formatTime(t: string) {
+function formatTime(t?: string | null) {
   if (!t) return '';
   const [h, m] = t.split(':').map(Number);
   const ampm = h >= 12 ? 'PM' : 'AM';
@@ -30,7 +33,7 @@ function formatTime(t: string) {
   return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
-const STATUS_VARIANT: Record<string, any> = {
+const STATUS_VARIANT: Record<string, BadgeProps['variant']> = {
   scheduled: 'info',
   live: 'warning',
   completed: 'success',
@@ -38,7 +41,7 @@ const STATUS_VARIANT: Record<string, any> = {
   absent: 'destructive',
 };
 
-const PAYMENT_STATUS_VARIANT: Record<string, any> = {
+const PAYMENT_STATUS_VARIANT: Record<string, BadgeProps['variant']> = {
   paid: 'success',
   partial: 'warning',
   unpaid: 'secondary',
@@ -74,11 +77,7 @@ export function CourseDetails() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [updatingLesson, setUpdatingLesson] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (id) fetchAll(id);
-  }, [id]);
-
-  const fetchAll = async (courseId: string) => {
+  const fetchAll = useCallback(async (courseId: string) => {
     setLoading(true);
     try {
       const [courseRes, lessonsRes, paymentsRes, enrollRes] = await Promise.all([
@@ -101,6 +100,10 @@ export function CourseDetails() {
           .eq('is_active', true),
       ]);
 
+      if (lessonsRes.error) toast.error('Failed to load lessons.');
+      if (paymentsRes.error) toast.error('Failed to load payments.');
+      if (enrollRes.error) toast.error('Failed to load enrollments.');
+
       if (courseRes.error || !courseRes.data) {
         toast.error('Course not found.');
         navigate('/management/courses');
@@ -116,42 +119,53 @@ export function CourseDetails() {
       const enrolledIds = Array.from(
         new Set<string>([
           c.student_id,
-          ...((enrollRes.data || []).map((e: any) => e.student_id as string)),
+          ...((enrollRes.data || []).map((e: { student_id: string }) => e.student_id)),
         ]),
       );
 
       // Names for every student referenced by an enrollment OR a lesson
-      const lessonStudentIds = (lessonsRes.data || []).map((l: any) => l.student_id as string);
+      const lessonStudentIds = (lessonsRes.data || []).map((l: { student_id: string }) => l.student_id);
       const allStudentIds = Array.from(new Set<string>([...enrolledIds, ...lessonStudentIds]));
 
       const [profilesRes, teacherRes] = await Promise.all([
         allStudentIds.length > 0
           ? supabase.from('profiles').select('id, full_name').in('id', allStudentIds)
-          : Promise.resolve({ data: [] as any[] }),
+          : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
         supabase.from('profiles').select('full_name').eq('id', c.teacher_id).single(),
       ]);
 
       const nameMap: Record<string, string> = {};
-      (profilesRes.data || []).forEach((p: any) => { nameMap[p.id] = p.full_name; });
+      (profilesRes.data || []).forEach((p: { id: string; full_name: string }) => { nameMap[p.id] = p.full_name; });
 
       setStudentNames(nameMap);
       setTeacherName(teacherRes.data?.full_name ?? '-');
       setEnrolledStudents(
         enrolledIds.map(sid => ({ id: sid, full_name: nameMap[sid] ?? '-' })),
       );
-    } catch (err) {
-      console.error('Error loading course details:', err);
+    } catch {
+      toast.error('Failed to load course details.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate]);
+
+  useEffect(() => {
+    if (id) fetchAll(id);
+  }, [id, fetchAll]);
 
   const updateLessonStatus = async (lessonId: string, newStatus: string) => {
     setUpdatingLesson(lessonId);
-    const { error } = await supabase
-      .from('lessons')
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .eq('id', lessonId);
+    let error: { message: string } | null = null;
+    try {
+      ({ error } = await supabase
+        .from('lessons')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', lessonId));
+    } catch (e) {
+      error = { message: e instanceof Error ? e.message : 'Request failed' };
+    } finally {
+      setUpdatingLesson(null);
+    }
 
     if (error) {
       toast.error('Failed to update lesson status.');
@@ -161,7 +175,6 @@ export function CourseDetails() {
       );
       toast.success(`Lesson marked as ${newStatus}.`);
     }
-    setUpdatingLesson(null);
   };
 
   const updateCoursePaymentStatus = async (newStatus: string) => {
@@ -633,6 +646,7 @@ export function CourseDetails() {
           preferred_days: course.preferred_days,
           preferred_time: course.preferred_time,
           start_date: course.start_date,
+          timezone: course.timezone || 'UTC',
         }}
         excludeStudentIds={enrolledStudents.map(s => s.id)}
       />

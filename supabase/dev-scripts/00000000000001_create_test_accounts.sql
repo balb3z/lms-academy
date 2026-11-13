@@ -22,9 +22,9 @@
 -- Go to: Supabase Dashboard > Authentication > Users > "Add user"
 -- Create these 3 users:
 -- 
--- 1. Management:  admin@academy.test     / password: admin123
--- 2. Teacher:     teacher@academy.test   / password: teacher123  
--- 3. Student:     student@academy.test   / password: student123
+-- 1. Management:  admin@academy.test     / password: <SET_A_STRONG_PASSWORD_BEFORE_RUNNING>
+-- 2. Teacher:     teacher@academy.test   / password: <SET_A_STRONG_PASSWORD_BEFORE_RUNNING>
+-- 3. Student:     student@academy.test   / password: <SET_A_STRONG_PASSWORD_BEFORE_RUNNING>
 -- 
 -- After creating them, copy their UUIDs from the "Users" table and replace below.
 -- ─────────────────────────────────────────────────────────────────────────────

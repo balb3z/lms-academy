@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { supabase } from '@/lib/supabase/client';
@@ -11,30 +11,46 @@ export function Calendar() {
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [showAddLesson, setShowAddLesson] = useState(false);
 
-  useEffect(() => {
-    fetchLessons();
-  }, [currentDate]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const fetchLessons = async () => {
+  const fetchLessons = useCallback(async () => {
+    setLoading(true);
     const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
     const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
 
-    const startStr = startOfMonth.toISOString().split('T')[0];
-    const endStr = endOfMonth.toISOString().split('T')[0];
+    const toYmd = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const startStr = toYmd(startOfMonth);
+    const endStr = toYmd(endOfMonth);
 
     // Calendar only renders lesson title + time, so no profile join is needed.
-    const { data, error } = await supabase
-      .from('lessons')
-      .select('*')
-      .gte('scheduled_date', startStr)
-      .lte('scheduled_date', endStr)
-      .order('scheduled_date')
-      .order('start_time');
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('lessons')
+        .select('*')
+        .gte('scheduled_date', startStr)
+        .lte('scheduled_date', endStr)
+        .order('scheduled_date')
+        .order('start_time');
 
-    if (error) console.error('Error fetching calendar lessons:', error);
-    setLessons(data || []);
-    setLoading(false);
-  };
+      if (fetchError) {
+        setError(fetchError.message);
+        setLessons([]);
+      } else {
+        setError(null);
+        setLessons((data as Lesson[]) || []);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load lessons');
+    } finally {
+      setLoading(false);
+    }
+  }, [currentDate]);
+
+  useEffect(() => {
+    fetchLessons();
+  }, [fetchLessons]);
 
   const getDaysInMonth = (date: Date) => {
     const year = date.getFullYear();
@@ -48,11 +64,7 @@ export function Calendar() {
   };
 
   const getLessonsForDay = (day: number) => {
-    const dateStr = new Date(
-      currentDate.getFullYear(),
-      currentDate.getMonth(),
-      day
-    ).toISOString().split('T')[0];
+    const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     
     return lessons.filter(lesson => lesson.scheduled_date === dateStr);
   };
@@ -90,7 +102,13 @@ export function Calendar() {
         </Button>
       </div>
 
-      <Card>
+      {error && (
+        <div role="alert" className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+
+      <Card className={loading ? 'opacity-60' : undefined}>
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>{monthName} {year}</CardTitle>
@@ -133,7 +151,7 @@ export function Calendar() {
                         className="text-xs bg-primary/10 rounded px-1 py-0.5 truncate"
                         title={lesson.title}
                       >
-                        {lesson.start_time.slice(0, 5)} {lesson.title}
+                        {(lesson.start_time || '').slice(0, 5)} {lesson.title}
                       </div>
                     ))}
                     {dayLessons.length > 3 && (

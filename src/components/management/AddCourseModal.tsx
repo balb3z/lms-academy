@@ -11,6 +11,7 @@ import { toast } from 'react-toastify';
 import { CheckCircle, BookOpen, Globe } from 'lucide-react';
 import { DAY_LABELS, DAY_KEYS, buildCourseLessonRows } from '@/utils/courseSchedule';
 import { getTimezoneOptions } from '@/utils/timezone';
+import { safeHttpsUrl } from '@/utils/safeUrl';
 
 // ── types ──────────────────────────────────────────────────────────────────────
 
@@ -213,7 +214,7 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
 
       // Resolve the teacher's Zoom link + the per-lesson rates
       const selectedTeacher = teachers.find(t => t.id === formData.teacher_id);
-      const teacherZoom = selectedTeacher?.zoom_link || null;
+      const teacherZoom = safeHttpsUrl(selectedTeacher?.zoom_link);
       const teacherRateNum =
         formData.teacher_rate && !isNaN(parseFloat(formData.teacher_rate))
           ? parseFloat(formData.teacher_rate)
@@ -281,7 +282,7 @@ export function AddCourseModal({ open, onClose, onSuccess }: Props) {
       toast.success(`Course created with ${lessonRows.length} lessons scheduled!`);
     } catch (err: unknown) {
       console.error('Error creating course:', err);
-      toast.error(err.message || 'Failed to create course.');
+      toast.error((err instanceof Error ? err.message : '') || 'Failed to create course.');
     } finally {
       setLoading(false);
     }

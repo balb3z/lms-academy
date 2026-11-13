@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
+import { toast } from 'react-toastify';
 import { supabase } from '@/lib/supabase/client';
 import { Student } from '@/types';
 import { Search, Plus, Eye, Edit, Trash2 } from 'lucide-react';
@@ -36,7 +37,7 @@ export function Students() {
         .order('created_at', { ascending: false });
 
       if (studentsError) {
-        console.error('Error fetching students:', studentsError);
+        toast.error('Failed to load students.');
         setLoading(false);
         return;
       }
@@ -69,8 +70,8 @@ export function Students() {
       });
 
       setStudents(enriched);
-    } catch (err) {
-      console.error('Unexpected error loading students:', err);
+    } catch {
+      toast.error('Unexpected error loading students.');
     } finally {
       setLoading(false);
     }

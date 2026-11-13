@@ -20,7 +20,7 @@ export function ForgotPassword() {
       setSent(true);
       toast.success('Password reset email sent');
     } catch (error) {
-      toast.error(error.message || 'Failed to send reset email');
+      toast.error(error instanceof Error && error.message ? error.message : 'Failed to send reset email');
     } finally {
       setLoading(false);
     }

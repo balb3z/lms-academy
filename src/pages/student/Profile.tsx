@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -23,32 +23,31 @@ export function StudentProfilePage() {
     parent_phone: ''
   });
 
-  useEffect(() => {
-    if (user) {
-      fetchProfile();
-    }
-  }, [user]);
+  const userId = user?.id;
 
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
+    if (!userId) return;
     setLoading(true);
     try {
       const { data: studentData, error } = await supabase
         .from('students')
         .select('*')
-        .eq('id', user?.id)
-        .single();
+        .eq('id', userId)
+        .maybeSingle();
+      if (error) throw error;
 
-      if (error || !studentData) {
+      if (!studentData) {
         setStudent(null);
-        setLoading(false);
         return;
       }
 
       // Resolve profile + user email separately (no broken profile:user_id embed)
       const [profileRes, userRes] = await Promise.all([
-        supabase.from('profiles').select('full_name, phone, address, avatar_url').eq('id', studentData.id).single(),
-        supabase.from('users').select('email').eq('id', studentData.id).single(),
+        supabase.from('profiles').select('id, full_name, phone, address, avatar_url').eq('id', studentData.id).maybeSingle(),
+        supabase.from('users').select('email').eq('id', studentData.id).maybeSingle(),
       ]);
+      if (profileRes.error) throw profileRes.error;
+      if (userRes.error) throw userRes.error;
 
       const s = {
         ...studentData,
@@ -73,10 +72,15 @@ export function StudentProfilePage() {
       });
     } catch (err) {
       console.error('Error loading profile:', err);
+      toast.error('Failed to load profile.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
+
+  useEffect(() => {
+    fetchProfile();
+  }, [fetchProfile]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,28 +88,35 @@ export function StudentProfilePage() {
 
     try {
       // Update profile
-      await supabase
+      const { data: profileRows, error: profileErr } = await supabase
         .from('profiles')
         .update({
           full_name: formData.full_name,
           phone: formData.phone,
           address: formData.address
         })
-        .eq('id', user?.id);
+        .eq('id', userId)
+        .select('id');
+      if (profileErr) throw profileErr;
+      if (!profileRows || profileRows.length === 0) throw new Error('Profile was not updated');
 
       // Update student
-      await supabase
+      const { data: studentRows, error: studentErr } = await supabase
         .from('students')
         .update({
           parent_name: formData.parent_name,
           parent_email: formData.parent_email,
           parent_phone: formData.parent_phone
         })
-        .eq('id', user?.id);
+        .eq('id', userId)
+        .select('id');
+      if (studentErr) throw studentErr;
+      if (!studentRows || studentRows.length === 0) throw new Error('Student record was not updated');
 
       toast.success('Profile updated successfully');
       fetchProfile();
     } catch (error) {
+      console.error('Error updating profile:', error);
       toast.error('Failed to update profile');
     } finally {
       setSaving(false);

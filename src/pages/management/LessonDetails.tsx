@@ -7,23 +7,11 @@ import { supabase } from '@/lib/supabase/client';
 import { Lesson, LessonReport } from '@/types';
 import { formatDate, formatTime } from '@/utils/format';
 import { getTimezoneOffsetLabel } from '@/utils/timezone';
+import { toast } from 'react-toastify';
 import { ArrowLeft, Calendar, Clock, Video, BookOpen, ClipboardList, Award, Globe } from 'lucide-react';
 
-export const RATING_LABEL: Record<string, string> = {
-  excellent: 'Excellent',
-  very_good: 'Very Good',
-  good: 'Good',
-  needs_improvement: 'Needs Improvement',
-};
-
-export type BadgeVariant = 'success' | 'info' | 'warning' | 'destructive' | 'secondary' | 'default';
-
-export const RATING_VARIANT: Record<string, BadgeVariant> = {
-  excellent: 'success',
-  very_good: 'success',
-  good: 'info',
-  needs_improvement: 'warning',
-};
+import { RATING_LABEL } from '@/utils/rating';
+import { openExternal } from '../../utils/safeUrl';
 
 // Separate component for the lesson report to avoid JSX parsing issues
 function LessonReportCard({ report }: { report: LessonReport }) {
@@ -126,12 +114,12 @@ export function LessonDetails() {
       const { data, error } = await supabase.from('lessons').select('*').eq('id', id).single();
       if (error || !data) {
         setLesson(null);
-        setLoading(false);
+        if (error) toast.error('Failed to load lesson.');
         return;
       }
       setLesson(data);
 
-      const [subjectRes, profilesRes, usersRes, reportRes, courseRes, teacherRes] = await Promise.all([
+      const [subjectRes, profilesRes, usersRes, reportRes, teacherRes] = await Promise.all([
         data.subject_id
           ? supabase.from('subjects').select('id, name').eq('id', data.subject_id).single()
           : Promise.resolve({ data: null }),
@@ -143,9 +131,6 @@ export function LessonDetails() {
           .eq('lesson_id', id)
           .order('submitted_at', { ascending: false })
           .limit(1),
-        data.course_id
-          ? supabase.from('courses').select('timezone').eq('id', data.course_id).single()
-          : Promise.resolve({ data: null }),
         supabase.from('teachers').select('timezone').eq('id', data.teacher_id).single(),
       ]);
 
@@ -161,8 +146,8 @@ export function LessonDetails() {
       setTeacherEmail(emailById[data.teacher_id] || '');
       setReport(((reportRes.data as LessonReport[]) || [])[0] || null);
       setTeacherTimezone(teacherRes.data?.timezone || 'UTC');
-    } catch (err) {
-      console.error('Error loading lesson:', err);
+    } catch {
+      toast.error('Unexpected error loading lesson.');
     } finally {
       setLoading(false);
     }
@@ -249,7 +234,7 @@ export function LessonDetails() {
             </div>
             {lesson.meeting_url && (
               <div>
-                <Button variant="outline" size="sm" onClick={() => window.open(lesson.meeting_url, '_blank', 'noopener,noreferrer')}>
+                <Button variant="outline" size="sm" onClick={() => openExternal(lesson.meeting_url)}>
                   Open Meeting Link
                 </Button>
               </div>

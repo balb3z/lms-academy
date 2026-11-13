@@ -12,82 +12,75 @@ export function useAuth() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    console.log('🔐 useAuth: Setting up auth listener...');
-    
-    let subscription: { unsubscribe: () => void } | null = null;
+    let cancelled = false;
 
-    const setupAuthListener = async () => {
+    const loadUserRow = async (userId: string) => {
       try {
-        // Get current session first
-        const { data: sessionData } = await auth.getCurrentSession();
-        if (sessionData?.session?.user) {
-          const { data: userData } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', sessionData.session.user.id)
-            .maybeSingle();
-          if (userData) {
-            setUser(userData);
-            setRole(userData.role);
-          }
+        const { data: userData, error } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error) {
+          console.error('Error fetching user data:', error);
+        } else if (userData) {
+          setUser(userData);
+          setRole(userData.role);
+        } else {
+          console.warn('No user row found in public.users for:', userId);
         }
-        setLoading(false);
-
-        // Set up auth listener
-        const { data: authData } = supabase.auth.onAuthStateChange(async (event, session) => {
-          console.log('🔐 Auth event:', event);
-          
-          if (session?.user) {
-            console.log('🔐 User authenticated:', session.user.email);
-            try {
-              const { data: userData, error } = await supabase
-                .from('users')
-                .select('*')
-                .eq('id', session.user.id)
-                .maybeSingle();
-              
-              if (error) {
-                console.error('❌ Error fetching user data:', error);
-              } else if (userData) {
-                console.log('✅ User data loaded:', userData);
-                setUser(userData);
-                setRole(userData?.role);
-              } else {
-                console.warn('⚠️ No user row found in public.users for:', session.user.id);
-              }
-            } catch (error) {
-              console.error('❌ Error in auth state change:', error);
-            }
-          } else {
-            console.log('🔐 User logged out');
-            setUser(null);
-            setRole(null);
-          }
-          setLoading(false);
-        });
-
-        subscription = authData;
       } catch (error) {
-        console.error('❌ Error setting up auth:', error);
-        setLoading(false);
+        console.error('Error in auth state change:', error);
       }
     };
 
-    setupAuthListener();
+    // Register synchronously so cleanup can always unsubscribe.
+    const { data: authData } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const userId = session.user.id;
+        // Defer: awaiting Supabase queries inside this callback can deadlock supabase-js v2.
+        setTimeout(async () => {
+          await loadUserRow(userId);
+          if (!cancelled) setLoading(false);
+        }, 0);
+      } else {
+        setUser(null);
+        setRole(null);
+        setLoading(false);
+      }
+    });
+
+    (async () => {
+      try {
+        const { data: sessionData } = await auth.getCurrentSession();
+        if (cancelled) return;
+        if (sessionData?.session?.user) {
+          await loadUserRow(sessionData.session.user.id);
+        }
+      } catch (error) {
+        console.error('Error setting up auth:', error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
 
     return () => {
-      if (subscription && typeof subscription.unsubscribe === 'function') {
-        subscription.unsubscribe();
-      }
+      cancelled = true;
+      authData.subscription.unsubscribe();
     };
   }, []);
 
   const signIn = async (email: string, password: string) => {
 try {
-              console.log('🔐 Signing in:', email);
               const { user, role } = await auth.signIn(email, password);
-              console.log('✅ Sign in successful:', email, 'Role:', role);
-              setUser(user);
+              setUser({
+                id: user.id,
+                email: user.email ?? email,
+                role,
+                created_at: user.created_at,
+                updated_at: user.updated_at ?? user.created_at,
+              });
               setRole(role);
               
               switch(role) {
@@ -120,11 +113,10 @@ try {
       toast.info('Logged out successfully');
     } catch (error) {
       console.error('❌ Sign out error:', error);
-      toast.error(error.message || 'Logout failed');
+      toast.error(error instanceof Error ? error.message : 'Logout failed');
     }
   };
 
-  console.log('🔐 useAuth state:', { user: user?.email, role, loading });
 
   return { user, role, loading, signIn, signOut };
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'react-toastify';
 import { CheckCircle, ArrowLeft } from 'lucide-react';
+import { Lesson } from '@/types';
 
 export function TeacherReportForm() {
   // Route is /teacher/lessons/:id/report → the param is `id`.
@@ -17,7 +18,7 @@ export function TeacherReportForm() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [alreadyDone, setAlreadyDone] = useState(false);
-  const [lesson, setLesson] = useState<any>(null);
+  const [lesson, setLesson] = useState<Lesson | null>(null);
   const [studentName, setStudentName] = useState('');
   const [errors, setErrors] = useState<{ topics_covered?: string; homework?: string }>({});
 
@@ -36,38 +37,38 @@ export function TeacherReportForm() {
     is_visible_to_student: true,
   });
 
-  useEffect(() => {
-    if (lessonId) fetchLessonData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lessonId]);
-
-  const fetchLessonData = async () => {
+  const fetchLessonData = useCallback(async () => {
+    if (!lessonId) return;
     setLoading(true);
     try {
       const [lessonRes, existingRes] = await Promise.all([
-        supabase.from('lessons').select('*').eq('id', lessonId).single(),
+        supabase.from('lessons').select('*').eq('id', lessonId).maybeSingle(),
         supabase.from('lesson_reports').select('id').eq('lesson_id', lessonId).limit(1),
       ]);
 
-      if (lessonRes.error || !lessonRes.data) {
+      if (lessonRes.error) throw lessonRes.error;
+      if (existingRes.error) throw existingRes.error;
+
+      if (!lessonRes.data) {
         toast.error('Lesson not found.');
         navigate('/teacher');
         return;
       }
 
-      const l = lessonRes.data;
+      const l = lessonRes.data as Lesson;
       setLesson(l);
 
-      // Already completed or already reported → block a second submission
+      // Already completed or already reported -> block a second submission
       if (l.status === 'completed' || (existingRes.data && existingRes.data.length > 0)) {
         setAlreadyDone(true);
       }
 
-      const { data: profile } = await supabase
+      const { data: profile, error: profileErr } = await supabase
         .from('profiles')
         .select('full_name')
         .eq('id', l.student_id)
-        .single();
+        .maybeSingle();
+      if (profileErr) throw profileErr;
       setStudentName(profile?.full_name || 'Student');
     } catch (err) {
       console.error('Error loading lesson:', err);
@@ -75,7 +76,11 @@ export function TeacherReportForm() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [lessonId, navigate]);
+
+  useEffect(() => {
+    fetchLessonData();
+  }, [fetchLessonData]);
 
   const validate = () => {
     const next: { topics_covered?: string; homework?: string } = {};
@@ -96,7 +101,7 @@ export function TeacherReportForm() {
 
     try {
       // 1. Save the lesson report (visible to the student)
-      const { data: report, error: reportError } = await supabase
+      const { error: reportError } = await supabase
         .from('lesson_reports')
         .insert({
           lesson_id: lessonId,
@@ -116,7 +121,7 @@ export function TeacherReportForm() {
           is_visible_to_student: formData.is_visible_to_student,
           submitted_by: user?.id,
         })
-        .select()
+        .select('id')
         .single();
 
       if (reportError) throw new Error(`Report: ${reportError.message}`);
@@ -124,17 +129,6 @@ export function TeacherReportForm() {
       // If the lesson has no stamped teacher_rate yet (e.g. it was generated
       // before rates existed), pull it from the course enrollment so the
       // teacher's earnings actually update on completion.
-      let teacherRate = lesson.teacher_rate ?? null;
-      if (teacherRate === null && lesson.course_id) {
-        const { data: enrollment } = await supabase
-          .from('course_enrollments')
-          .select('teacher_rate')
-          .eq('course_id', lesson.course_id)
-          .eq('student_id', lesson.student_id)
-          .maybeSingle();
-        if (enrollment?.teacher_rate != null) teacherRate = Number(enrollment.teacher_rate);
-      }
-
       // 2. Complete the lesson — this drives teacher earnings + student progress.
       //    We .select() so a silent RLS no-op is detected instead of ignored.
       const { data: updatedLesson, error: lessonError } = await supabase
@@ -143,7 +137,6 @@ export function TeacherReportForm() {
           status: 'completed',
           attendance_status: formData.attendance_status,
           actual_end_time: new Date().toISOString(),
-          teacher_rate: teacherRate,
         })
         .eq('id', lessonId)
         .select('id');
@@ -171,23 +164,23 @@ export function TeacherReportForm() {
 
       // 4. Notify the student (non-fatal if it fails)
       try {
-        await supabase.from('notifications').insert({
+        const { error: notifyError } = await supabase.from('notifications').insert({
           user_id: lesson.student_id,
           type: 'new_report',
           title: 'Lesson completed — report available',
           message: `Your report for "${lesson.title}" is ready. Grade: ${formData.performance_rating.replace('_', ' ')}.`,
           link: `/student/lessons/${lessonId}`,
         });
+        if (notifyError) console.error('Notification failed (non-fatal):', notifyError);
       } catch (notifyErr) {
         console.error('Notification failed (non-fatal):', notifyErr);
       }
 
       toast.success('Meeting ended and report submitted. Lesson marked completed.');
       navigate('/teacher');
-      return report;
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error submitting report:', error);
-      toast.error(error.message || 'Failed to submit report.');
+      toast.error(error instanceof Error ? error.message : 'Failed to submit report.');
     } finally {
       setSubmitting(false);
     }

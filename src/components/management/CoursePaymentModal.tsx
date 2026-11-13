@@ -96,7 +96,7 @@ export function CoursePaymentModal({
       setFormData(blankForm());
     } catch (err: unknown) {
       console.error('Error recording payment:', err);
-      toast.error(err.message || 'Failed to record payment.');
+      toast.error((err instanceof Error ? err.message : '') || 'Failed to record payment.');
     } finally {
       setLoading(false);
     }
@@ -193,7 +193,7 @@ export function CoursePaymentModal({
               id="update_payment_status"
               className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
               value={formData.update_payment_status}
-              onChange={e => setFormData(p => ({ ...p, update_payment_status: e.target.value }))}
+              onChange={e => setFormData(p => ({ ...p, update_payment_status: e.target.value as FormData["update_payment_status"] }))}
             >
               <option value="">— Keep current status —</option>
               <option value="paid">Paid</option>

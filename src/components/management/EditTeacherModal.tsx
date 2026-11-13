@@ -4,11 +4,10 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { supabase } from '@/lib/supabase/client';
 import { toast } from 'react-toastify';
 import { getTimezoneOptions } from '@/utils/timezone';
-import { getTimezoneOptions } from '@/utils/timezone';
+import { safeHttpsUrl } from '@/utils/safeUrl';
 
 interface Props {
   open: boolean;
@@ -85,6 +84,10 @@ export function EditTeacherModal({ open, onClose, onSuccess, teacherId }: Props)
       toast.error('Full name is required.');
       return;
     }
+    if (formData.zoom_link.trim() && !safeHttpsUrl(formData.zoom_link)) {
+      toast.error('Zoom link must be a valid https:// URL.');
+      return;
+    }
     setLoading(true);
 
     try {
@@ -117,7 +120,7 @@ export function EditTeacherModal({ open, onClose, onSuccess, teacherId }: Props)
       onClose();
     } catch (err: unknown) {
       console.error('Error updating teacher:', err);
-      toast.error(err.message || 'Failed to update teacher.');
+      toast.error((err instanceof Error ? err.message : '') || 'Failed to update teacher.');
     } finally {
       setLoading(false);
     }

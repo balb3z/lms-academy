@@ -51,24 +51,24 @@ export function generateLessonDates(
 
   if (dayNums.size === 0 || totalLessons < 1) return results;
 
-  // Parse start date components
+  // Walk plain calendar dates (course-local); timezone only matters when stamping UTC.
   const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
-  
-  // Create a starting point: midnight in the course timezone on startDate
-  // We create a date at the target time in the target timezone, then convert to UTC
-  let currentLocal = new Date(Date.UTC(startYear, startMonth - 1, startDay, 0, 0, 0));
-  
+  if (isNaN(startYear) || isNaN(startMonth) || isNaN(startDay)) return results;
+
+  let y = startYear;
+  let m = startMonth - 1;
+  let d = startDay;
+
   let guard = 0;
   const maxIterations = 2000;
 
   while (results.length < totalLessons && guard < maxIterations) {
-    // Get the day of week in the course timezone for currentLocal
-    const dayOfWeek = getDayOfWeekInTimezone(currentLocal, courseTimezone);
-    
+    const cal = new Date(Date.UTC(y, m, d));
+    const dayOfWeek = cal.getUTCDay();
+
     if (dayNums.has(dayOfWeek)) {
-      // Format the date in the course timezone
-      const dateStr = formatDateInTimezone(currentLocal, courseTimezone);
-      
+      const dateStr = cal.toISOString().slice(0, 10);
+
       // Convert local times to UTC
       const startUtc = localToUtc(dateStr, preferredTime, courseTimezone);
       const endTimeLocal = addMinutesToTime(preferredTime, durationMinutes);
@@ -84,73 +84,14 @@ export function generateLessonDates(
       });
     }
     
-    // Increment by one day in the course timezone
-    // Add 24 hours in the target timezone (handles DST transitions correctly)
-    currentLocal = addDaysInTimezone(currentLocal, 1, courseTimezone);
+    const next = new Date(Date.UTC(y, m, d + 1));
+    y = next.getUTCFullYear();
+    m = next.getUTCMonth();
+    d = next.getUTCDate();
     guard++;
   }
 
   return results;
-}
-
-/**
- * Get the day of week (0=Sunday, 6=Saturday) for a UTC date in a specific timezone.
- */
-function getDayOfWeekInTimezone(date: Date, timezone: string): number {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    weekday: 'numeric',
-  });
-  // Intl returns 1=Monday...7=Sunday, convert to 0=Sunday...6=Saturday
-  return (parseInt(formatter.format(new Date(date.getTime()))) % 7);
-}
-
-/**
- * Add days to a date in a specific timezone (handles DST correctly).
- */
-function addDaysInTimezone(date: Date, days: number, timezone: string): Date {
-  // Get the current time in the target timezone
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-  
-  const parts = formatter.formatToParts(new Date(date.getTime()));
-  const get = (type: string) => parts.find(p => p.type === type)?.value || '';
-  const year = parseInt(get('year'));
-  const month = parseInt(get('month')) - 1; // 0-indexed
-  const day = parseInt(get('day'));
-  const hour = parseInt(get('hour'));
-  const minute = parseInt(get('minute'));
-  
-  // Convert the new local date/time back to UTC
-  const newDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day + days).padStart(2, '0')}`;
-  const newTimeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-  
-  // Convert the new local date/time back to UTC
-  const utcIso = localToUtc(newDateStr, newTimeStr, timezone);
-  return new Date(utcIso);
-}
-
-/**
- * Format a UTC Date as YYYY-MM-DD in a specific timezone.
- */
-function formatDateInTimezone(date: Date, timezone: string): string {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const parts = formatter.formatToParts(date);
-  const get = (type: string) => parts.find(p => p.type === type)?.value || '';
-  return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
 export interface BuildLessonRowsParams {

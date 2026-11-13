@@ -79,36 +79,32 @@ export function localToUtc(dateStr: string, timeStr: string, timezone: string): 
   
   if (isNaN(year) || isNaN(month) || isNaN(day) || isNaN(hour) || isNaN(minute)) return '';
   
-  // Create a date in the target timezone
-  const date = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
-  
-  // Get the timezone offset for this specific date
+  // The wall-clock time expressed as if it were UTC
+  const wallMs = Date.UTC(year, month - 1, day, hour, minute, 0);
+
+  // Offset of the timezone at a given instant, in minutes (local - UTC),
+  // derived from the timezone's wall-clock parts (handles whole/half-hour zones).
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    timeZoneName: 'shortOffset',
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
   });
-  
-  // Format the date in the target timezone to get the offset
-  const formatted = formatter.format(date);
-  
-  // Parse the offset from the formatted string (e.g., "GMT+2:00")
-  const offsetMatch = formatted.match(/GMT([+-])(\d{1,2}):(\d{2})/);
-  let offsetMinutes = 0;
-  if (offsetMatch) {
-    const sign = offsetMatch[1] === '+' ? 1 : -1;
-    const hours = parseInt(offsetMatch[2], 10);
-    const minutes = parseInt(offsetMatch[3], 10);
-    offsetMinutes = sign * (hours * 60 + minutes);
-  }
-  
-  // The date was created as if it were UTC, but it represents local time in the target timezone
-  // To get the actual UTC time, we need to subtract the offset
-  const actualUtc = new Date(date.getTime() - offsetMinutes * 60 * 1000);
-  return actualUtc.toISOString();
+  const offsetAt = (instantMs: number): number => {
+    const parts = formatter.formatToParts(new Date(instantMs));
+    const get = (type: string) => Number(parts.find(p => p.type === type)?.value);
+    const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'));
+    return Math.round((asUtc - Math.floor(instantMs / 1000) * 1000) / 60000);
+  };
+
+  // Two passes so the offset is correct for the target instant across DST changes
+  let utcMs = wallMs - offsetAt(wallMs) * 60000;
+  utcMs = wallMs - offsetAt(utcMs) * 60000;
+  return new Date(utcMs).toISOString();
 }
 
 /**

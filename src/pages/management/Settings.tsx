@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { toast } from 'react-toastify';
+import { safeHttpsUrl } from '@/utils/safeUrl';
 
 export function Settings() {
   const [loading, setLoading] = useState(false);
@@ -20,9 +21,13 @@ export function Settings() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (settings.defaultMeetingUrl.trim() && !safeHttpsUrl(settings.defaultMeetingUrl)) {
+      toast.error('Default meeting URL must be a valid https:// link.');
+      return;
+    }
     setLoading(true);
     try {
-      await supabase
+      const { error } = await supabase
         .from('academy_settings')
         .upsert([
           { key: 'academy_name', value: settings.academyName },
@@ -31,10 +36,11 @@ export function Settings() {
           { key: 'default_meeting_url', value: settings.defaultMeetingUrl },
           { key: 'email_notifications', value: settings.emailNotifications },
           { key: 'lesson_reminder_hours', value: settings.lessonReminderHours }
-        ]);
-      
+        ], { onConflict: 'key' });
+      if (error) throw error;
+
       toast.success('Settings saved successfully');
-    } catch (error) {
+    } catch {
       toast.error('Failed to save settings');
     } finally {
       setLoading(false);

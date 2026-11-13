@@ -19,6 +19,10 @@ export interface Profile {
   date_of_birth?: string;
   address?: string;
   bio?: string;
+  /** Not a profiles column: lives in public.users.email; only present when joined/merged by a page. */
+  email?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Student {
@@ -31,6 +35,8 @@ export interface Student {
   parent_email?: string;
   parent_phone?: string;
   is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
   profile?: Profile;
   user?: User;
 }
@@ -44,6 +50,8 @@ export interface Teacher {
   zoom_link?: string;
   timezone?: string;
   is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
   profile?: Profile;
   user?: User;
 }
@@ -53,6 +61,8 @@ export interface Subject {
   name: string;
   description?: string;
   color: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Course {
@@ -182,4 +192,43 @@ export interface DashboardStats {
   upcomingLessons: number;
   completedLessons: number;
   attendanceRate: number;
+}
+
+export interface Attendance {
+  id: string;
+  student_id: string;
+  lesson_id: string;
+  teacher_id: string;
+  status: 'present' | 'late' | 'absent' | 'excused';
+  marked_by?: string;
+  marked_at?: string;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CourseEnrollment {
+  id: string;
+  course_id: string;
+  student_id: string;
+  start_date?: string;
+  lessons_generated?: number;
+  is_active?: boolean;
+  notes?: string;
+  enrolled_by?: string;
+  enrolled_at?: string;
+  student_price?: number;
+  teacher_rate?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface StudentTeacherAssignment {
+  id: string;
+  student_id: string;
+  teacher_id: string;
+  assigned_at?: string;
+  assigned_by?: string;
+  is_active?: boolean;
+  notes?: string;
 }

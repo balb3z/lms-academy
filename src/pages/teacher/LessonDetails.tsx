@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -7,8 +7,9 @@ import { supabase } from '@/lib/supabase/client';
 import { Lesson, LessonReport } from '@/types';
 import { formatDate, formatTime } from '@/utils/format';
 import { formatTimeInTimezone, formatDateInTimezone } from '@/utils/timezone';
-import { ArrowLeft, Calendar, Clock, Video, BookOpen, ClipboardList, Award } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, Video, BookOpen, ClipboardList, Award, Globe } from 'lucide-react';
 import { toast } from 'react-toastify';
+import { openExternal, safeHttpsUrl } from '../../utils/safeUrl';
 
 const RATING_LABEL: Record<string, string> = {
   excellent: 'Excellent',
@@ -37,29 +38,25 @@ export function TeacherLessonDetails() {
   const [teacherTimezone, setTeacherTimezone] = useState<string>('UTC');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (id) fetchLesson();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-
-  const fetchLesson = async () => {
+  const fetchLesson = useCallback(async () => {
+    if (!id) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('lessons').select('*').eq('id', id).single();
-      if (error || !data) {
+      const { data, error } = await supabase.from('lessons').select('*').eq('id', id).maybeSingle();
+      if (error) throw error;
+      if (!data) {
         setLesson(null);
-        setLoading(false);
         return;
       }
-      setLesson(data);
+      const row = data as Lesson;
 
       const [subjectRes, studentProfileRes, studentUserRes, teacherRes, reportRes] = await Promise.all([
-        data.subject_id
-          ? supabase.from('subjects').select('id, name, color').eq('id', data.subject_id).single()
-          : Promise.resolve({ data: null }),
-        supabase.from('profiles').select('full_name').eq('id', data.student_id).single(),
-        supabase.from('users').select('email').eq('id', data.student_id).single(),
-        supabase.from('teachers').select('zoom_link, timezone').eq('id', data.teacher_id).single(),
+        row.subject_id
+          ? supabase.from('subjects').select('id, name, color').eq('id', row.subject_id).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        supabase.from('profiles').select('full_name').eq('id', row.student_id).maybeSingle(),
+        supabase.from('users').select('email').eq('id', row.student_id).maybeSingle(),
+        supabase.from('teachers').select('zoom_link, timezone').eq('id', row.teacher_id).maybeSingle(),
         supabase
           .from('lesson_reports')
           .select('*')
@@ -68,7 +65,10 @@ export function TeacherLessonDetails() {
           .limit(1),
       ]);
 
-      setLesson(prev => (prev ? { ...prev, subject: subjectRes.data || undefined } : prev));
+      const relErr = subjectRes.error || studentProfileRes.error || studentUserRes.error || teacherRes.error || reportRes.error;
+      if (relErr) throw relErr;
+
+      setLesson({ ...row, subject: (subjectRes.data || undefined) as Lesson['subject'] });
       setStudentName(studentProfileRes.data?.full_name || 'Student');
       setStudentEmail(studentUserRes.data?.email || '');
       setZoomLink(teacherRes.data?.zoom_link || null);
@@ -76,10 +76,15 @@ export function TeacherLessonDetails() {
       setReport(((reportRes.data as LessonReport[]) || [])[0] || null);
     } catch (err) {
       console.error('Error loading lesson:', err);
+      toast.error('Failed to load lesson details.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    fetchLesson();
+  }, [fetchLesson]);
 
   const getStatusVariant = (status: string) => {
     switch (status) {
@@ -97,7 +102,7 @@ export function TeacherLessonDetails() {
   const handleStartLesson = async () => {
     if (!lesson) return;
     const link = resolveLink();
-    if (!link) {
+    if (!safeHttpsUrl(link)) {
       toast.error('No Zoom link set. Ask management to add your personal Zoom link.');
       return;
     }
@@ -109,16 +114,16 @@ export function TeacherLessonDetails() {
       .select('id');
 
     if (error || !data || data.length === 0) {
-      toast.error('Could not start the lesson.');
+      toast.error(error?.message || 'Could not start the lesson.');
       return;
     }
-    window.open(link, '_blank', 'noopener,noreferrer');
+    openExternal(link);
     fetchLesson();
   };
 
   const handleJoin = () => {
     const link = resolveLink();
-    if (link) window.open(link, '_blank', 'noopener,noreferrer');
+    if (link) openExternal(link);
     else toast.error('No Zoom link set.');
   };
 
@@ -133,15 +138,10 @@ export function TeacherLessonDetails() {
   // Determine display times - teacher sees in their timezone
   const teacherTz = teacherTimezone;
   
-  const displayStartTime = lesson.start_time_utc && lesson.end_time_utc && teacherTz
-    ? formatTimeInTimezone(lesson.start_time_utc, teacherTz)
-    : lesson.start_time;
-  const displayEndTime = lesson.start_time_utc && lesson.end_time_utc && teacherTz
-    ? formatTimeInTimezone(lesson.end_time_utc, teacherTz)
-    : lesson.end_time;
-  const displayDate = lesson.start_time_utc && teacherTz
-    ? formatDateInTimezone(lesson.start_time_utc, teacherTz)
-    : lesson.scheduled_date;
+  const hasUtc = Boolean(lesson.start_time_utc && lesson.end_time_utc);
+  const displayStartTime = (hasUtc && formatTimeInTimezone(lesson.start_time_utc, teacherTz)) || formatTime(lesson.start_time);
+  const displayEndTime = (hasUtc && formatTimeInTimezone(lesson.end_time_utc, teacherTz)) || formatTime(lesson.end_time);
+  const displayDate = (lesson.start_time_utc && formatDateInTimezone(lesson.start_time_utc, teacherTz)) || formatDate(lesson.scheduled_date);
 
   return (
     <div className="space-y-6">
@@ -166,11 +166,11 @@ export function TeacherLessonDetails() {
           <CardContent className="space-y-4">
             <div className="flex items-center gap-2">
               <Calendar className="h-4 w-4 text-muted-foreground" />
-              <span>{formatDate(displayDate)}</span>
+              <span>{displayDate}</span>
             </div>
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-muted-foreground" />
-              <span>{formatTime(displayStartTime)} - {formatTime(displayEndTime)}</span>
+              <span>{displayStartTime} - {displayEndTime}</span>
             </div>
             {lesson.subject?.name && (
               <div className="flex items-center gap-2">
@@ -184,7 +184,7 @@ export function TeacherLessonDetails() {
             </div>
             <div className="flex items-center gap-2">
               <Globe className="h-4 w-4 text-muted-foreground" />
-              <span>Course Timezone: {courseTimezone} (Teacher sees in {teacherTimezone})</span>
+              <span>Times shown in {teacherTimezone}</span>
             </div>
           </CardContent>
         </Card>

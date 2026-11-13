@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
-import { Badge } from '@/components/ui/Badge';
+import { Badge, BadgeProps } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { supabase } from '@/lib/supabase/client';
 import { LessonReport } from '@/types';
+import { toast } from 'react-toastify';
 import { Search, Eye } from 'lucide-react';
 import { formatDate } from '@/utils/format';
 
@@ -16,12 +17,9 @@ export function Reports() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    fetchReports();
-  }, []);
-
-  const fetchReports = async () => {
+  const fetchReports = useCallback(async () => {
     setLoading(true);
+    try {
 
     // Report + lesson in one query; student & teacher names resolved separately
     // (student_id / teacher_id === profiles.id, so there is no embed to join through).
@@ -31,39 +29,48 @@ export function Reports() {
       .order('submitted_at', { ascending: false });
 
     if (error) {
-      console.error('Error fetching reports:', error);
+      toast.error('Failed to load reports.');
       setReports([]);
-      setLoading(false);
       return;
     }
 
-    const list = rows || [];
+    const list = (rows || []) as LessonReport[];
     const personIds = [
       ...new Set([
-        ...list.map((r: any) => r.student_id),
-        ...list.map((r: any) => r.teacher_id),
+        ...list.map(r => r.student_id),
+        ...list.map(r => r.teacher_id),
       ].filter(Boolean)),
     ];
 
-    const { data: profiles } = personIds.length > 0
+    const { data: profiles, error: profilesError } = personIds.length > 0
       ? await supabase.from('profiles').select('id, full_name').in('id', personIds)
-      : { data: [] as any[] };
+      : { data: [] as { id: string; full_name: string }[], error: null };
+
+    if (profilesError) toast.error('Some names could not be loaded.');
 
     const nameById: Record<string, string> = {};
-    (profiles || []).forEach((p: any) => { nameById[p.id] = p.full_name; });
+    (profiles || []).forEach((p: { id: string; full_name: string }) => { nameById[p.id] = p.full_name; });
 
-    const enriched = list.map((r: any) => ({
+    const enriched = list.map(r => ({
       ...r,
       student: { id: r.student_id, profile: { full_name: nameById[r.student_id] } },
       teacher: { id: r.teacher_id, profile: { full_name: nameById[r.teacher_id] } },
-    }));
+    })) as unknown as LessonReport[];
 
     setReports(enriched);
-    setLoading(false);
-  };
+    } catch {
+      toast.error('Unexpected error loading reports.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchReports();
+  }, [fetchReports]);
 
   const getAttendanceBadge = (status: string) => {
-    const variants: Record<string, any> = {
+    const variants: Record<string, BadgeProps['variant']> = {
       present: 'success',
       late: 'warning',
       absent: 'destructive',
@@ -73,7 +80,7 @@ export function Reports() {
   };
 
   const getPerformanceBadge = (rating: string) => {
-    const variants: Record<string, any> = {
+    const variants: Record<string, BadgeProps['variant']> = {
       excellent: 'success',
       very_good: 'info',
       good: 'default',

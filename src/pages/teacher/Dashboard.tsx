@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -10,13 +10,74 @@ import { Lesson } from '@/types';
 import { formatTimeInTimezone, formatDateInTimezone, getCurrentDateInTimezone } from '@/utils/timezone';
 import { Play, FileText, Video } from 'lucide-react';
 import { toast } from 'react-toastify';
+import { openExternal, safeHttpsUrl } from '../../utils/safeUrl';
+
+function getStatusVariant(status: string): 'success' | 'warning' | 'info' | 'default' {
+  switch (status) {
+    case 'completed':
+      return 'success';
+    case 'live':
+      return 'warning';
+    case 'scheduled':
+      return 'info';
+    default:
+      return 'default';
+  }
+}
+
+// Attach student names + subjects to lessons, converting times to the teacher's timezone
+async function attachRelations(rows: Lesson[], teacherTimezone: string, zoomLink?: string): Promise<Lesson[]> {
+  if (!rows || rows.length === 0) return [];
+
+  const studentIds = [...new Set(rows.map(r => r.student_id).filter(Boolean))];
+  const subjectIds = [...new Set(rows.map(r => r.subject_id).filter((x): x is string => Boolean(x)))];
+
+  const [studentProfilesRes, subjectsRes] = await Promise.all([
+    studentIds.length > 0
+      ? supabase.from('profiles').select('id, full_name').in('id', studentIds)
+      : Promise.resolve({ data: [] as { id: string; full_name: string }[], error: null }),
+    subjectIds.length > 0
+      ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
+      : Promise.resolve({ data: [] as { id: string; name: string; color: string }[], error: null }),
+  ]);
+
+  const relErr = studentProfilesRes.error || subjectsRes.error;
+  if (relErr) console.error('Error fetching lesson relations:', relErr);
+
+  return rows.map(r => {
+    const sp = (studentProfilesRes.data || []).find((p: { id: string; full_name: string }) => p.id === r.student_id);
+    const subj = (subjectsRes.data || []).find((s: { id: string; name: string; color: string }) => s.id === r.subject_id);
+
+    let displayStartTime = r.start_time;
+    let displayEndTime = r.end_time;
+    let displayDate = r.scheduled_date;
+
+    if (r.start_time_utc && r.end_time_utc) {
+      const s = formatTimeInTimezone(r.start_time_utc, teacherTimezone);
+      const e = formatTimeInTimezone(r.end_time_utc, teacherTimezone);
+      const d = formatDateInTimezone(r.start_time_utc, teacherTimezone);
+      if (s) displayStartTime = s;
+      if (e) displayEndTime = e;
+      if (d) displayDate = d;
+    }
+
+    return {
+      ...r,
+      start_time: displayStartTime,
+      end_time: displayEndTime,
+      scheduled_date: displayDate,
+      teacher: { id: r.teacher_id, zoom_link: zoomLink } as Lesson['teacher'],
+      student: { id: r.student_id, profile: sp ? { id: sp.id, full_name: sp.full_name } : undefined } as Lesson['student'],
+      subject: (subj || undefined) as Lesson['subject'],
+    };
+  });
+}
 
 export function TeacherDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [todayLessons, setTodayLessons] = useState<Lesson[]>([]);
   const [pendingReports, setPendingReports] = useState<Lesson[]>([]);
-  const [teacherTimezone, setTeacherTimezone] = useState<string>('UTC');
   const [stats, setStats] = useState({
     totalStudents: 0,
     todayLessons: 0,
@@ -25,157 +86,99 @@ export function TeacherDashboard() {
   });
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (user) {
-      fetchTeacherData();
-    }
-  }, [user, fetchTeacherData]);
+  const userId = user?.id;
 
-  // Helper to attach student names + subjects + course timezone to lessons
-  const attachRelations = async (rows: { student_id: string; subject_id?: string; course_id?: string; start_time_utc?: string }[]): Promise<Lesson[]> => {
-    if (!rows || rows.length === 0) return [];
-
-    const studentIds = [...new Set(rows.map(r => r.student_id).filter(Boolean))];
-    const subjectIds = [...new Set(rows.map(r => r.subject_id).filter(Boolean))];
-    const courseIds = [...new Set(rows.map(r => r.course_id).filter(Boolean))];
-
-    const [studentProfilesRes, subjectsRes, coursesRes] = await Promise.all([
-      studentIds.length > 0
-        ? supabase.from('profiles').select('id, full_name').in('id', studentIds)
-        : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
-      subjectIds.length > 0
-        ? supabase.from('subjects').select('id, name, color').in('id', subjectIds)
-        : Promise.resolve({ data: [] as { id: string; name: string; color: string }[] }),
-      courseIds.length > 0
-        ? supabase.from('courses').select('id, timezone').in('id', courseIds)
-        : Promise.resolve({ data: [] as { id: string; timezone: string }[] }),
-    ]);
-
-    const courseTimezoneMap: Record<string, string> = {};
-    (coursesRes.data || []).forEach((c: { id: string; timezone: string }) => {
-      courseTimezoneMap[c.id] = c.timezone || 'UTC';
-    });
-
-    return rows.map(r => {
-      const sp = (studentProfilesRes.data || []).find((p: { id: string; full_name: string }) => p.id === r.student_id);
-      const subj = (subjectsRes.data || []).find((s: { id: string; name: string; color: string }) => s.id === r.subject_id);
-      
-      // Convert lesson times to teacher's timezone for display
-      let displayStartTime = r.start_time;
-      let displayEndTime = r.end_time;
-      let displayDate = r.scheduled_date;
-      
-      if (r.start_time_utc && r.end_time_utc && teacherTimezone) {
-        try {
-          displayStartTime = formatTimeInTimezone(r.start_time_utc, teacherTimezone);
-          displayEndTime = formatTimeInTimezone(r.end_time_utc, teacherTimezone);
-          displayDate = formatDateInTimezone(r.start_time_utc, teacherTimezone);
-        } catch (e) {
-          console.warn('Failed to convert timezone for lesson:', r.id, e);
-        }
-      }
-      
-      return {
-        ...r,
-        start_time: displayStartTime,
-        end_time: displayEndTime,
-        scheduled_date: displayDate,
-        student: { id: r.student_id, profile: sp ? { id: sp.id, full_name: sp.full_name } : undefined },
-        subject: subj || undefined,
-      };
-    });
-  };
-
-  const fetchTeacherData = async () => {
-    const teacherId = user?.id;
+  const fetchTeacherData = useCallback(async () => {
+    if (!userId) return;
+    const teacherId = userId;
     setLoading(true);
 
     try {
-      // Teacher's own record (for the personal Zoom link and timezone)
-      const { data: teacherRow } = await supabase
+      // Teacher's own record (timezone)
+      const { data: teacherRow, error: teacherErr } = await supabase
         .from('teachers')
-        .select('timezone')
+        .select('timezone, zoom_link')
         .eq('id', teacherId)
-        .single();
-      setTeacherTimezone(teacherRow?.timezone || 'UTC');
+        .maybeSingle();
+      if (teacherErr) throw teacherErr;
+      const teacherTimezone = teacherRow?.timezone || 'UTC';
+      const zoomLink = teacherRow?.zoom_link || undefined;
 
-      // 1. Get teacher's courses with timezones
-      const { data: courses } = await supabase
+      // 1. Teacher's courses with timezones
+      const { data: courses, error: coursesErr } = await supabase
         .from('courses')
         .select('id, timezone')
         .eq('teacher_id', teacherId)
         .eq('status', 'active');
+      if (coursesErr) throw coursesErr;
 
       const courseTimezoneMap: Record<string, string> = {};
-      (courses || []).forEach((c: any) => {
-        if (c.timezone) courseTimezoneMap[c.id] = c.timezone;
+      ((courses || []) as { id: string; timezone: string | null }[]).forEach((c) => {
+        courseTimezoneMap[c.id] = c.timezone || 'UTC';
       });
 
       const courseIds = Object.keys(courseTimezoneMap);
-      
-      // Determine "today" in each course timezone
-      const courseTodayMap: Record<string, string> = {};
-      courseIds.forEach(courseId => {
-        const tz = courseTimezoneMap[courseId] || 'UTC';
-        courseTodayMap[courseId] = getCurrentDateInTimezone(tz);
-      });
 
-      // 2. Today's lessons across all courses
-      const todayPromises = courseIds.map(courseId => {
-        const today = courseTodayMap[courseId];
-        return supabase
+      // 2. Today's lessons across all courses ("today" per course timezone)
+      const todayResults = await Promise.all(courseIds.map(courseId =>
+        supabase
           .from('lessons')
           .select('*')
           .eq('teacher_id', teacherId)
           .eq('course_id', courseId)
-          .eq('scheduled_date', today)
-          .order('start_time');
-      });
-
-      const todayResults = await Promise.all(todayPromises);
-      const todayRows = todayResults.flatMap(r => r.data || []);
-      const todayEnriched = await attachRelations(todayRows);
+          .eq('scheduled_date', getCurrentDateInTimezone(courseTimezoneMap[courseId]))
+          .order('start_time')
+      ));
+      const todayErr = todayResults.find(r => r.error)?.error;
+      if (todayErr) throw todayErr;
+      const todayRows = todayResults.flatMap(r => (r.data || []) as Lesson[]);
+      const todayEnriched = await attachRelations(todayRows, teacherTimezone, zoomLink);
       setTodayLessons(todayEnriched);
 
       // 3. Pending reports: completed lessons for this teacher that have no report
-      const { data: completedRows } = await supabase
+      const { data: completedRows, error: completedErr } = await supabase
         .from('lessons')
         .select('*')
         .eq('teacher_id', teacherId)
         .eq('status', 'completed')
         .order('scheduled_date', { ascending: false });
+      if (completedErr) console.error('Error fetching completed lessons:', completedErr);
 
       let pending: Lesson[] = [];
-      if (completedRows && completedRows.length > 0) {
-        const completedIds = completedRows.map((l: any) => l.id);
-        const { data: existingReports } = await supabase
+      if (!completedErr && completedRows && completedRows.length > 0) {
+        const completed = completedRows as Lesson[];
+        const { data: existingReports, error: reportsErr } = await supabase
           .from('lesson_reports')
           .select('lesson_id')
-          .in('lesson_id', completedIds);
+          .in('lesson_id', completed.map(l => l.id));
+        if (reportsErr) console.error('Error fetching lesson reports:', reportsErr);
 
-        const reportedIds = new Set((existingReports || []).map((r: any) => r.lesson_id));
-        const withoutReports = completedRows.filter((l: any) => !reportedIds.has(l.id));
-        pending = await attachRelations(withoutReports.slice(0, 10));
+        const reportedIds = new Set((existingReports || []).map((r: { lesson_id: string }) => r.lesson_id));
+        const withoutReports = reportsErr ? [] : completed.filter(l => !reportedIds.has(l.id));
+        pending = await attachRelations(withoutReports.slice(0, 10), teacherTimezone, zoomLink);
       }
       setPendingReports(pending);
 
       // 4. Stats
-      const { count: totalStudents } = await supabase
+      const { count: totalStudents, error: studentsErr } = await supabase
         .from('student_teacher_assignments')
         .select('*', { count: 'exact', head: true })
         .eq('teacher_id', teacherId)
         .eq('is_active', true);
+      if (studentsErr) console.error('Error fetching students count:', studentsErr);
 
-      const { count: completedLessons } = await supabase
+      const { count: completedLessons, error: completedCountErr } = await supabase
         .from('lessons')
         .select('*', { count: 'exact', head: true })
         .eq('teacher_id', teacherId)
         .eq('status', 'completed');
+      if (completedCountErr) console.error('Error fetching completed count:', completedCountErr);
 
-      const { data: attendanceData } = await supabase
+      const { data: attendanceData, error: attErr } = await supabase
         .from('attendance')
         .select('status')
         .eq('teacher_id', teacherId);
+      if (attErr) console.error('Error fetching attendance:', attErr);
 
       const presentCount = attendanceData?.filter(a => a.status === 'present').length || 0;
       const totalAttendance = attendanceData?.length || 0;
@@ -188,14 +191,21 @@ export function TeacherDashboard() {
       });
     } catch (error) {
       console.error('Error fetching teacher data:', error);
+      toast.error('Failed to load your dashboard. Please try again.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
+
+  useEffect(() => {
+    if (userId) {
+      fetchTeacherData();
+    }
+  }, [userId, fetchTeacherData]);
 
   const handleStartLesson = async (lesson: Lesson) => {
     const link = lesson.teacher?.zoom_link || lesson.meeting_url;
-    if (!link) {
+    if (!safeHttpsUrl(link)) {
       toast.error('No Zoom link set. Ask management to add your personal Zoom link.');
       return;
     }
@@ -207,16 +217,16 @@ export function TeacherDashboard() {
       .select('id');
 
     if (error || !data || data.length === 0) {
-      toast.error('Could not start the lesson.');
+      toast.error(error?.message || 'Could not start the lesson.');
       return;
     }
-    window.open(link, '_blank', 'noopener,noreferrer');
+    openExternal(link);
     fetchTeacherData();
   };
 
   const handleJoin = (lesson: Lesson) => {
     const link = lesson.teacher?.zoom_link || lesson.meeting_url;
-    if (link) window.open(link, '_blank', 'noopener,noreferrer');
+    if (link) openExternal(link);
     else toast.error('No Zoom link set.');
   };
 

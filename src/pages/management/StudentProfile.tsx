@@ -1,23 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { supabase } from '@/lib/supabase/client';
-import { Student } from '@/types';
+import { Student, User as AppUser } from '@/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/Avatar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
-import { Calendar, Mail, Phone, User, BookOpen, Clock } from 'lucide-react';
+import { Calendar, Mail, Phone, User } from 'lucide-react';
 
 export function StudentProfile() {
   const { id } = useParams();
   const [student, setStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchStudent();
-  }, [id]);
-
-  const fetchStudent = async () => {
+  const fetchStudent = useCallback(async () => {
     setLoading(true);
     try {
       const { data: studentData, error } = await supabase
@@ -28,18 +24,18 @@ export function StudentProfile() {
 
       if (error || !studentData) {
         setStudent(null);
-        setLoading(false);
         return;
       }
 
       // Resolve profile + user email separately (no broken profile:user_id embed)
       const [profileRes, userRes] = await Promise.all([
-        supabase.from('profiles').select('full_name, phone, avatar_url, date_of_birth, address').eq('id', studentData.id).single(),
+        supabase.from('profiles').select('id, full_name, phone, avatar_url, date_of_birth, address').eq('id', studentData.id).single(),
         supabase.from('users').select('email').eq('id', studentData.id).single(),
       ]);
 
       setStudent({
         ...studentData,
+        user: userRes.data ? { email: userRes.data.email } as AppUser : undefined,
         profile: profileRes.data ? {
           id: profileRes.data.id,
           full_name: profileRes.data.full_name,
@@ -47,15 +43,18 @@ export function StudentProfile() {
           avatar_url: profileRes.data.avatar_url,
           date_of_birth: profileRes.data.date_of_birth,
           address: profileRes.data.address,
-          email: userRes.data?.email,
         } : undefined,
       });
-    } catch (err) {
-      console.error('Error loading student:', err);
+    } catch {
+      setStudent(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    fetchStudent();
+  }, [fetchStudent]);
 
   if (loading) {
     return <div className="flex items-center justify-center h-64">Loading...</div>;
@@ -102,7 +101,7 @@ export function StudentProfile() {
             <CardContent className="space-y-3">
               <div className="flex items-center gap-2">
                 <Mail className="h-4 w-4 text-muted-foreground" />
-                <span>{student.profile?.email || 'Not provided'}</span>
+                <span>{student.user?.email || 'Not provided'}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Phone className="h-4 w-4 text-muted-foreground" />
@@ -110,7 +109,7 @@ export function StudentProfile() {
               </div>
               <div className="flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-muted-foreground" />
-                <span>Enrolled: {student.enrollment_date}</span>
+                <span>Enrolled: {student.enrollment_date || 'Not set'}</span>
               </div>
               <div className="flex items-center gap-2">
                 <User className="h-4 w-4 text-muted-foreground" />

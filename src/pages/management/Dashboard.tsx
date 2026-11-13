@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { StatsCard } from '@/components/ui/StatsCard';
@@ -12,6 +12,9 @@ import { AddLessonModal } from '@/components/management/AddLessonModal';
 import { AddStudentModal } from '@/components/management/AddStudentModal';
 import { AddTeacherModal } from '@/components/management/AddTeacherModal';
 import { AddCourseModal } from '@/components/management/AddCourseModal';
+import { openExternal } from '../../utils/safeUrl';
+
+type LessonRow = Omit<Lesson, 'student' | 'teacher' | 'subject' | 'course'>;
 
 export function ManagementDashboard() {
   const navigate = useNavigate();
@@ -25,22 +28,20 @@ export function ManagementDashboard() {
   });
   const [todayLessons, setTodayLessons] = useState<Lesson[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showAddLesson, setShowAddLesson] = useState(false);
   const [showAddStudent, setShowAddStudent] = useState(false);
   const [showAddTeacher, setShowAddTeacher] = useState(false);
   const [showAddCourse, setShowAddCourse] = useState(false);
 
-useEffect(() => {
-    fetchDashboardData();
-  }, []);
 
   // Helper to attach student/teacher names + subjects to lessons
-  async function attachRelations(rows: { student_id: string; teacher_id: string; subject_id?: string; start_time_utc?: string }[]): Promise<Lesson[]> {
+  async function attachRelations(rows: LessonRow[]): Promise<Lesson[]> {
     if (!rows || rows.length === 0) return [];
 
     const studentIds = [...new Set(rows.map(l => l.student_id).filter(Boolean))];
     const teacherIds = [...new Set(rows.map(l => l.teacher_id).filter(Boolean))];
-    const subjectIds = [...new Set(rows.map(l => l.subject_id).filter(Boolean))];
+    const subjectIds = [...new Set(rows.map(l => l.subject_id).filter((v): v is string => Boolean(v)))];
 
     const [spRes, tpRes, subjectsRes] = await Promise.all([
       supabase.from('profiles').select('id, full_name').in('id', studentIds),
@@ -77,12 +78,13 @@ useEffect(() => {
         student: { id: l.student_id, profile: sp ? { id: sp.id, full_name: sp.full_name } : undefined },
         teacher: { id: l.teacher_id, profile: tp ? { id: tp.id, full_name: tp.full_name } : undefined },
         subject: subj || undefined,
-      };
+      } as Lesson;
     });
   }
 
-  const fetchDashboardData = async () => {
-    const today = new Date().toISOString().split('T')[0]; // UTC today
+  const fetchDashboardData = useCallback(async () => {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
     try {
       const [
@@ -106,16 +108,17 @@ useEffect(() => {
       ]);
 
       // Fetch today's lessons — profiles resolved with separate round-trips
-      const { data: lessonRows } = await supabase
+      const { data: lessonRows, error: lessonsError } = await supabase
         .from('lessons')
         .select('*, subject:subject_id(*)')
         .eq('scheduled_date', today)
         .order('start_time');
+      if (lessonsError) throw lessonsError;
 
       let enrichedLessons: Lesson[] = [];
 
       if (lessonRows && lessonRows.length > 0) {
-        enrichedLessons = await attachRelations(lessonRows);
+        enrichedLessons = await attachRelations(lessonRows as LessonRow[]);
       }
 
       setTodayLessons(enrichedLessons);
@@ -127,12 +130,16 @@ useEffect(() => {
         upcomingLessons: upcomingLessons || 0,
         completedLessons: completedLessons || 0,
       });
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
   const getStatusVariant = (status: string) => {
     switch (status) {
@@ -174,6 +181,12 @@ useEffect(() => {
           </Button>
         </div>
       </div>
+
+      {loadError && (
+        <div role="alert" className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+          {loadError}
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -264,7 +277,7 @@ useEffect(() => {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => window.open(lesson.meeting_url, '_blank', 'noopener,noreferrer')}
+                        onClick={() => openExternal(lesson.meeting_url)}
                       >
                         Join
                       </Button>

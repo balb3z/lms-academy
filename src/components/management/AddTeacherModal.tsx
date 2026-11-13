@@ -8,6 +8,7 @@ import { supabase, provisioningClient } from '@/lib/supabase/client';
 import { toast } from 'react-toastify';
 import { Eye, EyeOff, Copy, CheckCircle } from 'lucide-react';
 import { getTimezoneOptions } from '@/utils/timezone';
+import { safeHttpsUrl } from '@/utils/safeUrl';
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -89,6 +90,7 @@ export function AddTeacherModal({ open, onClose, onSuccess }: Props) {
       next.password = 'Password must be at least 8 characters.';
     }
     if (!formData.timezone) next.timezone = 'Please select a timezone.';
+    if (formData.zoom_link.trim() && !safeHttpsUrl(formData.zoom_link)) next.zoom_link = 'Enter a valid https:// meeting link.';
     if (formData.years_of_experience && isNaN(Number(formData.years_of_experience))) {
       next.years_of_experience = 'Must be a number.';
     }
@@ -165,7 +167,7 @@ export function AddTeacherModal({ open, onClose, onSuccess }: Props) {
       toast.success('Teacher account created successfully!');
     } catch (err: unknown) {
       console.error('Error creating teacher:', err);
-      toast.error(err.message || 'Failed to create teacher account.');
+      toast.error((err instanceof Error ? err.message : '') || 'Failed to create teacher account.');
     } finally {
       setLoading(false);
     }

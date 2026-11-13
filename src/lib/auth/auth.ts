@@ -1,9 +1,9 @@
 import { supabase } from '../supabase/client';
+import type { Session } from '@supabase/supabase-js';
 import { UserRole } from '@/types';
 
 export const auth = {
   async signIn(email: string, password: string) {
-    console.log('🔐 auth.signIn called for:', email);
     
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -15,7 +15,6 @@ export const auth = {
       throw error;
     }
     
-    console.log('✅ Sign in successful, fetching user role...');
     
     const { data: userData, error: userError } = await supabase
       .from('users')
@@ -33,7 +32,6 @@ export const auth = {
       throw new Error('User account not properly configured. Please contact management.');
     }
     
-    console.log('✅ User role fetched:', userData.role);
     
     return {
       user: data.user,
@@ -42,17 +40,14 @@ export const auth = {
   },
 
   async signOut() {
-    console.log('🔐 Signing out...');
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error('❌ Sign out error:', error);
       throw error;
     }
-    console.log('✅ Signed out successfully');
   },
 
   async resetPassword(email: string) {
-    console.log('🔐 Resetting password for:', email);
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/auth/reset-password`,
     });
@@ -60,11 +55,9 @@ export const auth = {
       console.error('❌ Reset password error:', error);
       throw error;
     }
-    console.log('✅ Password reset email sent');
   },
 
   async updatePassword(newPassword: string) {
-    console.log('🔐 Updating password...');
     const { error } = await supabase.auth.updateUser({
       password: newPassword
     });
@@ -72,7 +65,6 @@ export const auth = {
       console.error('❌ Update password error:', error);
       throw error;
     }
-    console.log('✅ Password updated successfully');
   },
 
   getCurrentUser() {
@@ -83,10 +75,8 @@ export const auth = {
     return supabase.auth.getSession();
   },
 
-  onAuthStateChange(callback: (event: string, session: { user: { id: string; email: string } | null } | null) => void) {
-    console.log('🔐 Setting up auth state change listener...');
+  onAuthStateChange(callback: (event: string, session: Session | null) => void) {
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log('🔐 Auth event:', event);
       callback(event, session);
     });
     // Return the subscription object

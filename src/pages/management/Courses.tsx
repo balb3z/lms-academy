@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { supabase } from '@/lib/supabase/client';
 import { Search, Plus, Eye } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { AddCourseModal } from '@/components/management/AddCourseModal';
 
 // ── types ──────────────────────────────────────────────────────────────────────
@@ -30,6 +31,8 @@ interface CourseRow {
   teacher_name: string;
   completed_lessons: number;
 }
+
+type CourseBase = Omit<CourseRow, 'student_name' | 'teacher_name' | 'completed_lessons'>;
 
 const STATUS_VARIANT: Record<string, 'success' | 'info' | 'warning' | 'secondary' | 'default'> = {
   active: 'success',
@@ -58,11 +61,7 @@ export function Courses() {
   const [showAddModal, setShowAddModal] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    fetchCourses();
-  }, []);
-
-  const fetchCourses = async () => {
+  const fetchCourses = useCallback(async () => {
     setLoading(true);
     try {
       const { data: courseRows, error } = await supabase
@@ -71,20 +70,18 @@ export function Courses() {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Error fetching courses:', error);
-        setLoading(false);
+        toast.error('Failed to load courses.');
         return;
       }
 
       if (!courseRows || courseRows.length === 0) {
         setCourses([]);
-        setLoading(false);
         return;
       }
 
-      const studentIds = [...new Set(courseRows.map((c: any) => c.student_id as string))];
-      const teacherIds = [...new Set(courseRows.map((c: any) => c.teacher_id as string))];
-      const courseIds = courseRows.map((c: any) => c.id as string);
+      const studentIds = [...new Set(courseRows.map((c: CourseBase) => c.student_id))];
+      const teacherIds = [...new Set(courseRows.map((c: CourseBase) => c.teacher_id))];
+      const courseIds = courseRows.map((c: CourseBase) => c.id);
 
       const [spRes, tpRes, lessonsRes] = await Promise.all([
         supabase.from('profiles').select('id, full_name').in('id', studentIds),
@@ -98,13 +95,13 @@ export function Courses() {
 
       // Build completed-lesson count per course
       const completedMap: Record<string, number> = {};
-      (lessonsRes.data || []).forEach((l: any) => {
+      (lessonsRes.data || []).forEach((l: { course_id: string }) => {
         completedMap[l.course_id] = (completedMap[l.course_id] || 0) + 1;
       });
 
-      const enriched: CourseRow[] = courseRows.map((c: any) => {
-        const sp = (spRes.data || []).find((p: any) => p.id === c.student_id);
-        const tp = (tpRes.data || []).find((p: any) => p.id === c.teacher_id);
+      const enriched: CourseRow[] = courseRows.map((c: CourseBase) => {
+        const sp = (spRes.data || []).find((p: { id: string; full_name: string }) => p.id === c.student_id);
+        const tp = (tpRes.data || []).find((p: { id: string; full_name: string }) => p.id === c.teacher_id);
         return {
           ...c,
           student_name: sp?.full_name ?? '-',
@@ -114,12 +111,16 @@ export function Courses() {
       });
 
       setCourses(enriched);
-    } catch (err) {
-      console.error('Unexpected error loading courses:', err);
+    } catch {
+      toast.error('Unexpected error loading courses.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchCourses();
+  }, [fetchCourses]);
 
   const filtered = courses.filter(
     c =>

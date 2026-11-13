@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/Input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
 import { supabase } from '@/lib/supabase/client';
-import { Lesson } from '@/types';
+import { Lesson, Subject } from '@/types';
+import { toast } from 'react-toastify';
 import { Search, Plus, Eye, Calendar } from 'lucide-react';
 import { formatDate, formatTime } from '@/utils/format';
 import { AddLessonModal } from '@/components/management/AddLessonModal';
@@ -18,13 +19,9 @@ export function Lessons() {
   const [showAddLesson, setShowAddLesson] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    fetchLessons();
-  }, []);
-
-  const fetchLessons = async () => {
+  const fetchLessons = useCallback(async () => {
     setLoading(true);
-
+    try {
     const { data: rows, error } = await supabase
       .from('lessons')
       .select('*')
@@ -32,45 +29,52 @@ export function Lessons() {
       .order('start_time');
 
     if (error) {
-      console.error('Error fetching lessons:', error);
+      toast.error('Failed to load lessons.');
       setLessons([]);
-      setLoading(false);
       return;
     }
 
-    const list = rows || [];
+    const list = (rows || []) as Lesson[];
     const personIds = [
       ...new Set([
-        ...list.map((l: any) => l.student_id),
-        ...list.map((l: any) => l.teacher_id),
+        ...list.map(l => l.student_id),
+        ...list.map(l => l.teacher_id),
       ].filter(Boolean)),
     ];
-    const subjectIds = [...new Set(list.map((l: any) => l.subject_id).filter(Boolean))];
+    const subjectIds = [...new Set(list.map(l => l.subject_id).filter((v): v is string => Boolean(v)))];
 
     const [profilesRes, subjectsRes] = await Promise.all([
       personIds.length > 0
         ? supabase.from('profiles').select('id, full_name').in('id', personIds)
-        : Promise.resolve({ data: [] as any[] }),
+        : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
       subjectIds.length > 0
         ? supabase.from('subjects').select('id, name').in('id', subjectIds)
-        : Promise.resolve({ data: [] as any[] }),
+        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
     ]);
 
     const nameById: Record<string, string> = {};
-    (profilesRes.data || []).forEach((p: any) => { nameById[p.id] = p.full_name; });
-    const subjectById: Record<string, any> = {};
-    (subjectsRes.data || []).forEach((s: any) => { subjectById[s.id] = s; });
+    (profilesRes.data || []).forEach((p: { id: string; full_name: string }) => { nameById[p.id] = p.full_name; });
+    const subjectById: Record<string, Pick<Subject, 'id' | 'name'>> = {};
+    (subjectsRes.data || []).forEach((s: Pick<Subject, 'id' | 'name'>) => { subjectById[s.id] = s; });
 
-    const enriched = list.map((l: any) => ({
+    const enriched = list.map(l => ({
       ...l,
       student: { id: l.student_id, profile: { full_name: nameById[l.student_id] } },
       teacher: { id: l.teacher_id, profile: { full_name: nameById[l.teacher_id] } },
       subject: l.subject_id ? subjectById[l.subject_id] : undefined,
-    }));
+    })) as unknown as Lesson[];
 
     setLessons(enriched);
-    setLoading(false);
-  };
+    } catch {
+      toast.error('Unexpected error loading lessons.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLessons();
+  }, [fetchLessons]);
 
   const getStatusVariant = (status: string) => {
     switch (status) {

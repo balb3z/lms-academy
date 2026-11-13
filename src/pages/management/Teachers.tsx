@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
+import { toast } from 'react-toastify';
 import { supabase } from '@/lib/supabase/client';
 import { Teacher } from '@/types';
 import { Search, Plus, Eye, Edit, Trash2, UserCog } from 'lucide-react';
@@ -38,7 +39,7 @@ export function Teachers() {
         .order('created_at', { ascending: false });
 
       if (teachersError) {
-        console.error('Error fetching teachers:', teachersError);
+        toast.error('Failed to load teachers.');
         setLoading(false);
         return;
       }
@@ -71,8 +72,8 @@ export function Teachers() {
       });
 
       setTeachers(enriched);
-    } catch (err) {
-      console.error('Unexpected error loading teachers:', err);
+    } catch {
+      toast.error('Unexpected error loading teachers.');
     } finally {
       setLoading(false);
     }

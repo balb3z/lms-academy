@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { useState, useEffect, useCallback } from 'react';
+import { toast } from 'react-toastify';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
@@ -8,68 +9,75 @@ import { useAuth } from '@/hooks/useAuth';
 import { Student } from '@/types';
 import { Search } from 'lucide-react';
 
+type StudentRow = Student & { email?: string };
+
 export function TeacherStudents() {
   const { user } = useAuth();
-  const [students, setStudents] = useState<Student[]>([]);
+  const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    if (user) {
-      fetchStudents();
-    }
-  }, [user]);
+  const userId = user?.id;
 
-  const fetchStudents = async () => {
-    const teacherId = user?.id;
+  const fetchStudents = useCallback(async () => {
+    if (!userId) return;
     setLoading(true);
 
-    const { data: assignments } = await supabase
-      .from('student_teacher_assignments')
-      .select('student_id')
-      .eq('teacher_id', teacherId)
-      .eq('is_active', true);
+    try {
+      const { data: assignments, error: assignErr } = await supabase
+        .from('student_teacher_assignments')
+        .select('student_id')
+        .eq('teacher_id', userId)
+        .eq('is_active', true);
+      if (assignErr) throw assignErr;
 
-    const studentIds = [...new Set((assignments || []).map(a => a.student_id))];
+      const studentIds = [...new Set((assignments || []).map(a => a.student_id as string))];
 
-    if (studentIds.length === 0) {
-      setStudents([]);
+      if (studentIds.length === 0) {
+        setStudents([]);
+        return;
+      }
+
+      const { data: studentRows, error: studentsErr } = await supabase
+        .from('students')
+        .select('*')
+        .in('id', studentIds)
+        .order('created_at', { ascending: false });
+      if (studentsErr) throw studentsErr;
+
+      const rows = (studentRows || []) as Student[];
+      const ids = rows.map(s => s.id);
+      const [profilesRes, usersRes] = await Promise.all([
+        supabase.from('profiles').select('id, full_name, phone').in('id', ids),
+        supabase.from('users').select('id, email').in('id', ids),
+      ]);
+      if (profilesRes.error) throw profilesRes.error;
+      if (usersRes.error) throw usersRes.error;
+
+      setStudents(rows.map(s => {
+        const p = (profilesRes.data || []).find((x: { id: string }) => x.id === s.id);
+        const u = (usersRes.data || []).find((x: { id: string }) => x.id === s.id);
+        return {
+          ...s,
+          email: u?.email,
+          profile: p ? { id: p.id, full_name: p.full_name, phone: p.phone || undefined } : undefined,
+        };
+      }));
+    } catch (err) {
+      console.error('Error fetching students:', err);
+      toast.error('Failed to load students.');
+    } finally {
       setLoading(false);
-      return;
     }
+  }, [userId]);
 
-    const { data: studentRows } = await supabase
-      .from('students')
-      .select('*')
-      .in('id', studentIds)
-      .order('created_at', { ascending: false });
-
-    const ids = (studentRows || []).map((s: any) => s.id);
-    const [profilesRes, usersRes] = await Promise.all([
-      ids.length > 0
-        ? supabase.from('profiles').select('id, full_name, phone').in('id', ids)
-        : Promise.resolve({ data: [] as any[] }),
-      ids.length > 0
-        ? supabase.from('users').select('id, email').in('id', ids)
-        : Promise.resolve({ data: [] as any[] }),
-    ]);
-
-    const enriched = (studentRows || []).map((s: any) => {
-      const p = (profilesRes.data || []).find((x: any) => x.id === s.id);
-      const u = (usersRes.data || []).find((x: any) => x.id === s.id);
-      return {
-        ...s,
-        profile: p ? { id: p.id, full_name: p.full_name, phone: p.phone, email: u?.email } : undefined,
-      };
-    });
-
-    setStudents(enriched);
-    setLoading(false);
-  };
+  useEffect(() => {
+    fetchStudents();
+  }, [fetchStudents]);
 
   const filteredStudents = students.filter(student =>
     student.profile?.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-    student.profile?.email?.toLowerCase().includes(search.toLowerCase()) ||
+    student.email?.toLowerCase().includes(search.toLowerCase()) ||
     student.student_id?.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -121,7 +129,7 @@ export function TeacherStudents() {
                   <TableRow key={student.id}>
                     <TableCell className="font-mono text-sm">{student.student_id}</TableCell>
                     <TableCell className="font-medium">{student.profile?.full_name}</TableCell>
-                    <TableCell>{student.profile?.email}</TableCell>
+                    <TableCell>{student.email}</TableCell>
                     <TableCell>{student.profile?.phone || '-'}</TableCell>
                     <TableCell>
                       <Badge variant={student.is_active ? 'success' : 'secondary'}>

@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { toast } from 'react-toastify';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
@@ -18,48 +19,47 @@ export function TeacherReports() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    if (user) {
-      fetchReports();
-    }
-  }, [user]);
+  const userId = user?.id;
 
-  const fetchReports = async () => {
-    const teacherId = user?.id;
+  const fetchReports = useCallback(async () => {
+    if (!userId) return;
     setLoading(true);
+    try {
+      // Student names resolved separately (student_id === profiles.id, no FK to embed through).
+      const { data: rows, error } = await supabase
+        .from('lesson_reports')
+        .select('*, lesson:lesson_id (*)')
+        .eq('teacher_id', userId)
+        .order('submitted_at', { ascending: false });
+      if (error) throw error;
 
-    // Reports + lesson in one query; student names resolved separately because
-    // there is no user_id FK to embed through (student_id === profiles.id).
-    const { data: rows, error } = await supabase
-      .from('lesson_reports')
-      .select('*, lesson:lesson_id (*)')
-      .eq('teacher_id', teacherId)
-      .order('submitted_at', { ascending: false });
+      const list = (rows || []) as LessonReport[];
+      const studentIds = [...new Set(list.map(r => r.student_id).filter(Boolean))];
+      let profiles: { id: string; full_name: string }[] = [];
+      if (studentIds.length > 0) {
+        const { data, error: pErr } = await supabase.from('profiles').select('id, full_name').in('id', studentIds);
+        if (pErr) throw pErr;
+        profiles = data || [];
+      }
 
-    if (error) {
-      console.error('Error fetching teacher reports:', error);
-      setReports([]);
+      setReports(list.map(r => {
+        const p = profiles.find(pr => pr.id === r.student_id);
+        return { ...r, student: { id: r.student_id, profile: p ? { id: p.id, full_name: p.full_name } : undefined } as LessonReport['student'] };
+      }));
+    } catch (err) {
+      console.error('Error fetching teacher reports:', err);
+      toast.error('Failed to load reports.');
+    } finally {
       setLoading(false);
-      return;
     }
+  }, [userId]);
 
-    const list = rows || [];
-    const studentIds = [...new Set(list.map((r: any) => r.student_id).filter(Boolean))];
-    const { data: profiles } = studentIds.length > 0
-      ? await supabase.from('profiles').select('id, full_name').in('id', studentIds)
-      : { data: [] as any[] };
+  useEffect(() => {
+    fetchReports();
+  }, [fetchReports]);
 
-    const enriched = list.map((r: any) => {
-      const p = (profiles || []).find((pr: any) => pr.id === r.student_id);
-      return { ...r, student: { id: r.student_id, profile: p ? { full_name: p.full_name } : undefined } };
-    });
-
-    setReports(enriched);
-    setLoading(false);
-  };
-
-  const getAttendanceBadge = (status: string) => {
-    const variants: Record<string, any> = {
+  const getAttendanceBadge = (status: string): 'success' | 'warning' | 'destructive' | 'info' | 'default' => {
+    const variants: Record<string, 'success' | 'warning' | 'destructive' | 'info'> = {
       present: 'success',
       late: 'warning',
       absent: 'destructive',

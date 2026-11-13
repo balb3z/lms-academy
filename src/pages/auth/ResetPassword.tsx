@@ -21,13 +21,18 @@ export function ResetPassword() {
       return;
     }
 
+    if (password.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+
     setLoading(true);
     try {
       await auth.updatePassword(password);
       toast.success('Password updated successfully');
       navigate('/auth/login');
     } catch (error) {
-      toast.error(error.message || 'Failed to update password');
+      toast.error(error instanceof Error && error.message ? error.message : 'Failed to update password');
     } finally {
       setLoading(false);
     }

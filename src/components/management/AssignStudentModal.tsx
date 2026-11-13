@@ -182,7 +182,7 @@ export function AssignStudentModal({ open, onClose, onSuccess, course, excludeSt
       onClose();
     } catch (err: unknown) {
       console.error('Error assigning student to course:', err);
-      toast.error(err.message || 'Failed to assign student.');
+      toast.error((err instanceof Error ? err.message : '') || 'Failed to assign student.');
     } finally {
       setLoading(false);
     }
